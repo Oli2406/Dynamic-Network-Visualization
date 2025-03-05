@@ -11,7 +11,7 @@ cd Dynamic-Network-Visualization
 ```
 
 ### **2. Install Dependencies**
-Make sure you have **Node.js** (v16 or later) installed. Then, install the required dependencies:
+Make sure you have **Node.js** 20.18.0 installed. Then, install the required dependencies:
 ```sh
 npm install
 ```
