@@ -27,7 +27,7 @@ http://localhost:4200/
 ```
 
 ## 🛠 Dependencies
-- **Angular** (v15+)
+- **Angular** (v19+)
 - **D3.js** for data visualization
 
 ---
