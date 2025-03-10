@@ -16,6 +16,12 @@ Make sure you have **Node.js** 20.18.0 installed. Then, install the required dep
 npm install
 ```
 
+### ** Optional**
+In case D3 is not recognized run this command:
+```
+npm install --save-dev @types/d3
+```
+
 ### **3. Run the Development Server**
 To start the Angular application, run:
 ```sh
