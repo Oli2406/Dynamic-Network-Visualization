@@ -35,11 +35,16 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
-    const filteredData = this.csvData.filter(d => +d.year === this.pickedYear);
+    const filteredData = this.csvData.filter(d => {
+      const year = d.ExhibitionBeginDate ? new Date(d.ExhibitionBeginDate).getFullYear() : null;
+      return year === this.pickedYear;
+    });
+
+    console.log(filteredData)
 
     d3.select(this.el.nativeElement).select("#chart").html("");
 
-    const width = 600, height = 400;
+    const width = 800, height = 500;
 
     const svg = d3.select(this.el.nativeElement)
       .select("#chart")
@@ -48,13 +53,14 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("height", height);
 
     const barHeight = 30;
+
     svg.selectAll("rect")
       .data(filteredData)
       .enter()
       .append("rect")
       .attr("x", 50)
       .attr("y", (d: any, i: number) => i * (barHeight + 5))
-      .attr("width", (d: { value: string | number; }) => +d.value * 10)
+      .attr("width", (d: any) => 300)
       .attr("height", barHeight)
       .attr("fill", "#7600BC");
 
@@ -64,8 +70,9 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .append("text")
       .attr("x", 10)
       .attr("y", (d: any, i: number) => i * (barHeight + 5) + barHeight / 2)
-      .text((d: { name: any; }) => d.name)
+      .text((d: any) => d.ExhibitionTitle)
       .attr("fill", "white")
       .attr("alignment-baseline", "middle");
   }
+
 }
