@@ -1,6 +1,6 @@
 # Dynamic-Network-Visualization
 
-This is the repository for my Bachelor Project at **TU Wien**
+This is the repository for my Bachelor Project at **TU Wien**.
 
 ## 🚀 Getting Started
 
