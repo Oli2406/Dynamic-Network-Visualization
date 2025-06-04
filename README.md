@@ -1,6 +1,6 @@
 # Dynamic-Network-Visualization
 
-This is the repository for my Bachelor Project at **TU Wien**.
+This is the repository for my Bachelor Project at **TU Wien**
 
 ## 🚀 Getting Started
 
@@ -31,6 +31,9 @@ The application will be available at:
 ```
 http://localhost:4200/
 ```
+
+### **4. Pick a year**
+The included dataset contains around 35.000 works of art which were exhibited at the Museum of Modern Arts (MoMA). Pick a year between 1929 and 1989 and you wil see a visualized diagram of all exhibitions and artists in the corresponding year.
 
 ## 🛠 Dependencies
 - **Angular** (v19.2.0)
