@@ -27,22 +27,39 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   }
 
   loadCSVData() {
-    d3.csv('assets/MoMAExhibitions1929to1989.csv').then((data: any[]) => {
-      this.csvData = data;
-      this.updateVisualization();
-    }).catch((error: any) => console.error('Error loading CSV:', error));
-  }
+    function normalizeName(name: string): string {
+      return name ? name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() : "";
+    }
+    Promise.all([
+      d3.csv('assets/MoMAExhibitions1929to1989_normalized.csv'),
+      d3.csv('assets/fuzzy_memberships.csv')
+    ]).then(([rawData, fuzzyData]) => {
+      const fuzzyMap = new Map(
+        fuzzyData.map(d => [normalizeName(d['DisplayName']), d])
+      );
+      this.csvData = rawData.map(d => {
+        const normalizedName = normalizeName(d['DisplayName']);
+        const fuzzy = fuzzyMap.get(normalizedName) || {};
+        return { ...d, ...fuzzy };
+      });
 
+      this.updateVisualization();
+    }).catch(error => console.error('Error loading CSVs:', error));
+  }
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
-    interface ArtistNode extends d3.SimulationNodeDatum {
+    interface ArtistNode {
+      id: string;
       name: string;
       exhibition: string;
-      cluster?: { x: number; y: number };
+      x: number;
+      y: number;
+      predominantCommunity?: string;
+      fuzziness?: number;
+      fik?: number[];
     }
 
-    // **Filter data for the selected year**
     const filteredData = this.csvData.filter(d => {
       const year = d.ExhibitionBeginDate ? new Date(d.ExhibitionBeginDate).getFullYear() : null;
       return year === this.pickedYear;
@@ -56,143 +73,189 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       return;
     }
 
-    // **Count artists per exhibition**
-    const exhibitionCounts = new Map<string, number>();
+    const width = 1000;
+    const height = 700;
+    const nodeRadius = 6;
+    const clusterRadius = 60;
+    const layoutRadius = 300;
+    const fuzzinessThreshold = 0.4;
+
+    const exhibitionMap = new Map<string, ArtistNode[]>();
     filteredData.forEach(d => {
-      exhibitionCounts.set(d.ExhibitionTitle, (exhibitionCounts.get(d.ExhibitionTitle) || 0) + 1);
+      const id = `${d.DisplayName}_${d.ExhibitionTitle}`;
+      const fikKeys = Object.keys(d).filter(k => k.startsWith("fik_C"));
+      const fikValues = fikKeys.map(k => +d[k]);
+      const maxFik = Math.max(...fikValues);
+      const predominantIndex = fikValues.indexOf(maxFik);
+      const predominantCommunity = `C${predominantIndex + 1}`;
+      const fuzziness = 1 - maxFik;
+
+      if (!exhibitionMap.has(d.ExhibitionTitle)) {
+        exhibitionMap.set(d.ExhibitionTitle, []);
+      }
+
+      exhibitionMap.get(d.ExhibitionTitle)!.push({
+        id,
+        name: d.DisplayName,
+        exhibition: d.ExhibitionTitle,
+        x: 0,
+        y: 0,
+        predominantCommunity,
+        fuzziness,
+        fik: fikValues
+      });
     });
 
-    const maxArtists = Math.max(...exhibitionCounts.values());
+    const exhibitions = Array.from(exhibitionMap.keys());
+    const clusterCenters = new Map<string, { x: number; y: number }>();
 
-    // **Improved Scale for Group Sizes**
-    const groupSizeScale = d3.scaleSqrt()
-      .domain([1, maxArtists])
-      .range([10, 100])
-      .clamp(true);
+    exhibitions.forEach((ex, i) => {
+      const angle = (2 * Math.PI * i) / exhibitions.length;
+      clusterCenters.set(ex, {
+        x: width / 2 + Math.cos(angle) * layoutRadius,
+        y: height / 2 + Math.sin(angle) * layoutRadius
+      });
+    });
 
-    // **Generate initial cluster positions**
-    const clusterNodes = Array.from(exhibitionCounts.keys()).map((exhibition, i) => ({
-      id: exhibition,
-      size: groupSizeScale(exhibitionCounts.get(exhibition) || 1),
-      x: Math.random() * 800 - 400,
-      y: Math.random() * 500 - 250
-    }));
+    const allNodes: ArtistNode[] = [];
+    const links: { source: ArtistNode; target: ArtistNode }[] = [];
 
-    // **Cluster simulation for positioning**
-    const clusterSimulation = d3.forceSimulation(clusterNodes)
-      .force("x", d3.forceX(0).strength(0.1))
-      .force("y", d3.forceY(0).strength(0.1))
-      .force("collide", d3.forceCollide(d => d.size * 1.1))
-      .force("charge", d3.forceManyBody().strength(-150))
-      .stop();
+    exhibitionMap.forEach((nodes, ex) => {
+      const center = clusterCenters.get(ex)!;
+      const core = nodes.filter(n => n.fuzziness !== undefined && n.fuzziness < fuzzinessThreshold);
+      const fuzzy = nodes.filter(n => n.fuzziness !== undefined && n.fuzziness >= fuzzinessThreshold);
 
-    for (let i = 0; i < 300; i++) clusterSimulation.tick();
-
-    // **Map final positions for cluster centers**
-    const clusterCenters = new Map<string, { x: number, y: number }>();
-    clusterNodes.forEach(node => clusterCenters.set(node.id, { x: node.x, y: node.y }));
-
-    // **Extract unique artist nodes**
-    const artists: ArtistNode[] = filteredData.map(d => ({
-      name: d.DisplayName,
-      exhibition: d.ExhibitionTitle,
-      cluster: clusterCenters.get(d.ExhibitionTitle),
-      x: Math.random() * 800,
-      y: Math.random() * 500
-    }));
-
-    const width = 800, height = 500, radius = 3;
-
-    const svg = chartContainer.append<SVGSVGElement>("svg")
-      .attr("width", width)
-      .attr("height", height);
-
-    const g = svg.append<SVGGElement>("g");
-
-    // **Artist simulation**
-    const simulation = d3.forceSimulation<ArtistNode>(artists)
-      .force("x", d3.forceX(d => (d as ArtistNode).cluster?.x ?? width / 2).strength(0.1))
-      .force("y", d3.forceY(d => (d as ArtistNode).cluster?.y ?? height / 2).strength(0.1))
-      .force("collide", d3.forceCollide(radius + 3))
-      .on("tick", ticked);
-
-    const colorScale = d3.scaleOrdinal(d3.schemeCategory10)
-      .domain(Array.from(exhibitionCounts.keys()));
-
-    // **Append artist circles**
-    const circles = g.selectAll("circle.artist")
-      .data(artists)
-      .enter()
-      .append("circle")
-      .attr("class", "artist")
-      .attr("r", radius)
-      .attr("fill", d => colorScale(d.exhibition));
-
-    // **Append aggregated group circles**
-    const aggregatedGroups = g.selectAll("circle.group")
-      .data(clusterNodes)
-      .enter()
-      .append("circle")
-      .attr("class", "group")
-      .attr("cx", d => d.x)
-      .attr("cy", d => d.y)
-      .attr("r", d => d.size)
-      .attr("fill", d => colorScale(d.id))
-      .attr("opacity", 0.6);
-
-    const labels = g.selectAll(".artist-label")
-      .data(artists)
-      .enter()
-      .append("text")
-      .attr("class", "artist-label")
-      .attr("font-size", "2px")
-      .attr("fill", "#000")
-      .attr("text-anchor", "middle")
-      .attr("alignment-baseline", "middle")
-      .text(d => d.name)
-      .style("opacity", 0); // Hidden initially
-
-    // **Show artist label on hover, hide on mouseout**
-    circles.on("mouseover", function (event, d) {
-      d3.select(this).attr("stroke", "#000").attr("stroke-width", 2);
-      labels.filter(l => l.name === d.name).style("opacity", 1);
-    })
-      .on("mouseout", function (event, d) {
-        d3.select(this).attr("stroke", "none");
-        labels.filter(l => l.name === d.name).style("opacity", 0);
+      const angleStep = (2 * Math.PI) / Math.max(core.length, 1);
+      core.forEach((node, i) => {
+        node.x = center.x + Math.cos(i * angleStep) * clusterRadius;
+        node.y = center.y + Math.sin(i * angleStep) * clusterRadius;
+        allNodes.push(node);
       });
 
-    // **Append cluster (exhibition) labels**
-    const clusterLabels = g.selectAll(".cluster-label")
-      .data(clusterNodes)
-      .enter()
-      .append("text")
-      .attr("class", "cluster-label")
-      .attr("x", d => d.x)
-      .attr("y", d => d.y)
-      .text(d => d.id.length > 12 ? d.id.substring(0, 12) + "..." : d.id)
-      .attr("fill", "#444")
-      .attr("font-size", "12px")
-      .attr("font-weight", "bold")
-      .attr("text-anchor", "middle")
-      .style("opacity", 0.8);
+      fuzzy.forEach(fuzzy => {
+        if (!fuzzy.fik || fuzzy.fik.length === 0 || fuzzy.fik.every(val => isNaN(val))) {
+          console.warn("Skipping fuzzy node with invalid fik:", fuzzy.name);
+          fuzzy.x = width / 2 + Math.random() * 100 - 50;
+          fuzzy.y = height / 2 + Math.random() * 100 - 50;
+          allNodes.push(fuzzy);
+          return;
+        }
 
-    function ticked() {
-      circles.attr("cx", d => d.x!).attr("cy", d => d.y!);
-      labels.attr("x", d => d.x!).attr("y", d => d.y!);
-      clusterLabels.attr("x", d => clusterCenters.get(d.id)!.x).attr("y", d => clusterCenters.get(d.id)!.y);
+        const contributingCenters: { x: number; y: number }[] = [];
+        fuzzy.fik.forEach((w, i) => {
+          if (w > 0.1) {
+            const c = `C${i + 1}`;
+            for (const [ex2, center2] of clusterCenters) {
+              if (exhibitionMap.get(ex2)!.some(n => n.predominantCommunity === c)) {
+                contributingCenters.push(center2);
+                break;
+              }
+            }
+          }
+        });
+
+        if (contributingCenters.length > 0) {
+          const avgX = d3.mean(contributingCenters, c => c.x)!;
+          const avgY = d3.mean(contributingCenters, c => c.y)!;
+          fuzzy.x = avgX + Math.random() * 50 - 25;
+          fuzzy.y = avgY + Math.random() * 50 - 25;
+        } else {
+          console.warn("No valid community weights for fuzzy node:", fuzzy.name, fuzzy.fik);
+          fuzzy.x = width / 2 + Math.random() * 100 - 50;
+          fuzzy.y = height / 2 + Math.random() * 100 - 50;
+        }
+
+        allNodes.push(fuzzy);
+      });
+
+      for (let i = 0; i < core.length; i++) {
+        for (let j = i + 1; j < core.length; j++) {
+          links.push({ source: core[i], target: core[j] });
+        }
+      }
+    });
+
+    // Fuzzy node cross-links
+    const fuzzyOnly = allNodes.filter(n => n.fuzziness && n.fuzziness >= fuzzinessThreshold);
+    fuzzyOnly.forEach(fuzzy => {
+      fuzzy.fik!.forEach((w, i) => {
+        if (w > 0.1) {
+          const c = `C${i + 1}`;
+          const target = allNodes.find(n => n.predominantCommunity === c && n.fuzziness! < fuzzinessThreshold);
+          if (target) links.push({ source: fuzzy, target });
+        }
+      });
+    });
+
+    // --- Rendering ---
+    const svg = chartContainer.append("svg")
+      .attr("width", width)
+      .attr("height", height)
+      .style("background-color", "#fafafa");
+
+    const defs = svg.append("defs");
+    const g = svg.append("g");
+
+    const color = d3.scaleOrdinal<string>()
+      .domain(["C1", "C2", "C3", "C4", "C5", "C6"])
+      .range(d3.schemeCategory10);
+
+    const sanitizeId = (str: string) => str.normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9_-]/g, "_");
+
+    function createRadialGradient(d: ArtistNode, baseColor: string): string {
+      const gradientId = `gradient-${sanitizeId(d.id)}`;
+      if (!defs.select(`#${gradientId}`).empty()) return `url(#${gradientId})`;
+
+      const grad = defs.append("radialGradient").attr("id", gradientId);
+      grad.append("stop").attr("offset", "0%").attr("stop-color", "#fff");
+      grad.append("stop").attr("offset", "100%").attr("stop-color", baseColor);
+      return `url(#${gradientId})`;
     }
 
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 10])
-      .on("zoom", (event) => {
-        g.attr("transform", event.transform);
-        const zoomLevel = event.transform.k;
-        clusterLabels.style("opacity", zoomLevel <= 2.5 ? 1.0 : 0);
-        aggregatedGroups.style("opacity", 0.4);
-        circles.style("opacity", zoomLevel > 2.5 ? 1 : 0);
+    g.selectAll("line.link")
+      .data(links)
+      .enter()
+      .append("line")
+      .attr("class", "link")
+      .attr("x1", d => d.source.x)
+      .attr("y1", d => d.source.y)
+      .attr("x2", d => d.target.x)
+      .attr("y2", d => d.target.y)
+      .attr("stroke", d => d.source.fuzziness && d.source.fuzziness > fuzzinessThreshold ? "#aaa" : "#ccc")
+      .attr("stroke-dasharray", d => d.source.fuzziness && d.source.fuzziness > fuzzinessThreshold ? "3,2" : "0")
+      .attr("stroke-width", 1);
+
+    g.selectAll("circle.node")
+      .data(allNodes)
+      .enter()
+      .append("circle")
+      .attr("class", "node")
+      .attr("r", nodeRadius)
+      .attr("cx", d => d.x)
+      .attr("cy", d => d.y)
+      .attr("fill", d => {
+        const baseColor = color(d.predominantCommunity || "C1");
+        return d.fuzziness && d.fuzziness > fuzzinessThreshold
+          ? createRadialGradient(d, baseColor)
+          : baseColor;
       });
 
-    svg.call(zoom).call(zoom.transform, d3.zoomIdentity.translate(width / 2, height / 2));
+    g.selectAll("text.label")
+      .data(allNodes)
+      .enter()
+      .append("text")
+      .attr("x", d => d.x)
+      .attr("y", d => d.y - 10)
+      .attr("text-anchor", "middle")
+      .text(d => d.name)
+      .attr("font-size", "6px")
+      .attr("fill", "#333")
+      .style("opacity", 0);
+
+    svg.call(d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.5, 5])
+      .on("zoom", event => g.attr("transform", event.transform)));
   }
 }
