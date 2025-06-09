@@ -27,14 +27,14 @@ pca = PCA(n_components=5)
 X = pca.fit_transform(adj)
 
 # === Fuzzy C-Means Clustering ===
-n_clusters = 4  # You can change this number
+n_clusters = 4
 cntr, u, _, _, _, _, _ = fuzz.cluster.cmeans(
     X.T, c=n_clusters, m=2, error=0.005, maxiter=1000
 )
 
 # === Save Fuzzy Memberships ===
 memberships = pd.DataFrame(u.T, columns=[f"fik_C{i+1}" for i in range(n_clusters)])
-memberships["DisplayName"] = [a[2:] for a in artists]  # remove prefix
+memberships["DisplayName"] = [a[2:] for a in artists]
 memberships.to_csv(output_file, index=False)
 
 print(f"Saved fuzzy memberships for {len(memberships)} artists to {output_file}")
