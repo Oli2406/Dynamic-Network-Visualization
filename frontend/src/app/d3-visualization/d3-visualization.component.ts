@@ -30,22 +30,32 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     function normalizeName(name: string): string {
       return name ? name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() : "";
     }
+
     Promise.all([
       d3.csv('assets/MoMAExhibitions1929to1989_normalized.csv'),
-      d3.csv('assets/fuzzy_memberships.csv')
+      d3.csv('assets/fuzzy_memberships_by_year.csv')
     ]).then(([rawData, fuzzyData]) => {
-      const fuzzyMap = new Map(
-        fuzzyData.map(d => [normalizeName(d['DisplayName']), d])
-      );
+      const fuzzyMap = new Map<string, any>();
+      fuzzyData.forEach(d => {
+        const name = normalizeName(d['DisplayName']);
+        const year = d['Year'];
+        if (name && year) {
+          fuzzyMap.set(`${name}_${year}`, d);
+        }
+      });
+
       this.csvData = rawData.map(d => {
         const normalizedName = normalizeName(d['DisplayName']);
-        const fuzzy = fuzzyMap.get(normalizedName) || {};
-        return { ...d, ...fuzzy };
+        const year = d['ExhibitionBeginDate'] ? new Date(d['ExhibitionBeginDate']).getFullYear() : null;
+        const fuzzyKey = `${normalizedName}_${year}`;
+        const fuzzy = fuzzyMap.get(fuzzyKey) || {};
+        return { ...d, Year: year, ...fuzzy };
       });
 
       this.updateVisualization();
     }).catch(error => console.error('Error loading CSVs:', error));
   }
+
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
@@ -61,7 +71,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     }
 
     const filteredData = this.csvData.filter(d => {
-      const year = d.ExhibitionBeginDate ? new Date(d.ExhibitionBeginDate).getFullYear() : null;
+      const year = d['ExhibitionBeginDate'] ? new Date(d['ExhibitionBeginDate']).getFullYear() : null;
       return year === this.pickedYear;
     });
 
@@ -73,16 +83,27 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       return;
     }
 
+    const tooltip = chartContainer
+      .append("div")
+      .style("position", "absolute")
+      .style("padding", "4px 8px")
+      .style("background", "white")
+      .style("border", "1px solid #ccc")
+      .style("border-radius", "4px")
+      .style("pointer-events", "none")
+      .style("font-size", "12px")
+      .style("box-shadow", "0 2px 4px rgba(0,0,0,0.1)")
+      .style("opacity", 0);
+
     const width = 1000;
     const height = 700;
-    const nodeRadius = 6;
-    const clusterRadius = 60;
+    const nodeRadius = 3;
     const layoutRadius = 300;
     const fuzzinessThreshold = 0.4;
 
     const exhibitionMap = new Map<string, ArtistNode[]>();
     filteredData.forEach(d => {
-      const id = `${d.DisplayName}_${d.ExhibitionTitle}`;
+      const id = `${d['DisplayName']}_${d['ExhibitionTitle']}`;
       const fikKeys = Object.keys(d).filter(k => k.startsWith("fik_C"));
       const fikValues = fikKeys.map(k => +d[k]);
       const maxFik = Math.max(...fikValues);
@@ -90,14 +111,14 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       const predominantCommunity = `C${predominantIndex + 1}`;
       const fuzziness = 1 - maxFik;
 
-      if (!exhibitionMap.has(d.ExhibitionTitle)) {
-        exhibitionMap.set(d.ExhibitionTitle, []);
+      if (!exhibitionMap.has(d['ExhibitionTitle'])) {
+        exhibitionMap.set(d['ExhibitionTitle'], []);
       }
 
-      exhibitionMap.get(d.ExhibitionTitle)!.push({
+      exhibitionMap.get(d['ExhibitionTitle'])!.push({
         id,
-        name: d.DisplayName,
-        exhibition: d.ExhibitionTitle,
+        name: d['DisplayName'],
+        exhibition: d['ExhibitionTitle'],
         x: 0,
         y: 0,
         predominantCommunity,
@@ -117,24 +138,32 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     });
 
+    const groupSizes = Array.from(exhibitionMap.values()).map(nodes => nodes.length);
+    const minSize = d3.min(groupSizes)!;
+    const maxSize = d3.max(groupSizes)!;
+    const radiusScale = d3.scaleLinear().domain([minSize, maxSize]).range([30, 100]);
+
     const allNodes: ArtistNode[] = [];
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
 
     exhibitionMap.forEach((nodes, ex) => {
       const center = clusterCenters.get(ex)!;
+      const clusterSize = nodes.length;
+      const thisClusterRadius = radiusScale(clusterSize);
+
       const core = nodes.filter(n => n.fuzziness !== undefined && n.fuzziness < fuzzinessThreshold);
       const fuzzy = nodes.filter(n => n.fuzziness !== undefined && n.fuzziness >= fuzzinessThreshold);
 
-      const angleStep = (2 * Math.PI) / Math.max(core.length, 1);
-      core.forEach((node, i) => {
-        node.x = center.x + Math.cos(i * angleStep) * clusterRadius;
-        node.y = center.y + Math.sin(i * angleStep) * clusterRadius;
+      core.forEach((node) => {
+        const angle = Math.random() * 2 * Math.PI;
+        const radius = Math.sqrt(Math.random()) * thisClusterRadius;
+        node.x = center.x + Math.cos(angle) * radius;
+        node.y = center.y + Math.sin(angle) * radius;
         allNodes.push(node);
       });
 
       fuzzy.forEach(fuzzy => {
         if (!fuzzy.fik || fuzzy.fik.length === 0 || fuzzy.fik.every(val => isNaN(val))) {
-          console.warn("Skipping fuzzy node with invalid fik:", fuzzy.name);
           fuzzy.x = width / 2 + Math.random() * 100 - 50;
           fuzzy.y = height / 2 + Math.random() * 100 - 50;
           allNodes.push(fuzzy);
@@ -160,7 +189,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
           fuzzy.x = avgX + Math.random() * 50 - 25;
           fuzzy.y = avgY + Math.random() * 50 - 25;
         } else {
-          console.warn("No valid community weights for fuzzy node:", fuzzy.name, fuzzy.fik);
           fuzzy.x = width / 2 + Math.random() * 100 - 50;
           fuzzy.y = height / 2 + Math.random() * 100 - 50;
         }
@@ -175,7 +203,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       }
     });
 
-    // Fuzzy node cross-links
     const fuzzyOnly = allNodes.filter(n => n.fuzziness && n.fuzziness >= fuzzinessThreshold);
     fuzzyOnly.forEach(fuzzy => {
       fuzzy.fik!.forEach((w, i) => {
@@ -214,6 +241,11 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       return `url(#${gradientId})`;
     }
 
+    const uniqueCommunities = new Set(allNodes.map(n => n.predominantCommunity));
+    const isSingleCommunity = uniqueCommunities.size === 1;
+    const onlyCommunity = [...uniqueCommunities][0] ?? "C1";
+    const hasFuzzyNodes = allNodes.some(n => n.fuzziness && n.fuzziness > fuzzinessThreshold);
+
     g.selectAll("line.link")
       .data(links)
       .enter()
@@ -223,7 +255,10 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("y1", d => d.source.y)
       .attr("x2", d => d.target.x)
       .attr("y2", d => d.target.y)
-      .attr("stroke", d => d.source.fuzziness && d.source.fuzziness > fuzzinessThreshold ? "#aaa" : "#ccc")
+      .attr("stroke", d => {
+        const community = d.source.predominantCommunity || "C1";
+        return color(community);
+      })
       .attr("stroke-dasharray", d => d.source.fuzziness && d.source.fuzziness > fuzzinessThreshold ? "3,2" : "0")
       .attr("stroke-width", 1);
 
@@ -236,23 +271,27 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("cx", d => d.x)
       .attr("cy", d => d.y)
       .attr("fill", d => {
-        const baseColor = color(d.predominantCommunity || "C1");
-        return d.fuzziness && d.fuzziness > fuzzinessThreshold
+        const baseColor = isSingleCommunity
+          ? color(onlyCommunity)
+          : color(d.predominantCommunity || "C1");
+
+        return hasFuzzyNodes && d.fuzziness && d.fuzziness > fuzzinessThreshold
           ? createRadialGradient(d, baseColor)
           : baseColor;
+      })
+      .on("mouseover", (event, d) => {
+        tooltip
+          .style("opacity", 1)
+          .html(`<strong>${d.name}</strong>`);
+      })
+      .on("mousemove", (event) => {
+        tooltip
+          .style("left", (event.pageX + 10) + "px")
+          .style("top", (event.pageY - 20) + "px");
+      })
+      .on("mouseout", () => {
+        tooltip.style("opacity", 0);
       });
-
-    g.selectAll("text.label")
-      .data(allNodes)
-      .enter()
-      .append("text")
-      .attr("x", d => d.x)
-      .attr("y", d => d.y - 10)
-      .attr("text-anchor", "middle")
-      .text(d => d.name)
-      .attr("font-size", "6px")
-      .attr("fill", "#333")
-      .style("opacity", 0);
 
     svg.call(d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.5, 5])

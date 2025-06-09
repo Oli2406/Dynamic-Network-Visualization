@@ -12,7 +12,7 @@ import {D3VisualizationComponent} from './d3-visualization/d3-visualization.comp
 })
 export class AppComponent {
   title = 'frontend';
-  pickedYear: number | null = 1935;
+  pickedYear: number | null = 1929;
 
   updateYear(yearInput: HTMLInputElement) {
     this.pickedYear = yearInput.value ? parseInt(yearInput.value, 10) : null;
