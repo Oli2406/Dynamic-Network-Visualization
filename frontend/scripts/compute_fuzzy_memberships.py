@@ -3,26 +3,26 @@ import networkx as nx
 from sklearn.decomposition import PCA
 import skfuzzy as fuzz
 
-# === Load Data ===
+# Load Data
 input_file = "MoMAExhibitions1929to1989.csv"
 output_file = "fuzzy_memberships_by_year.csv"
 df = pd.read_csv(input_file, encoding="latin1")
 
-# === Get Unique Years ===
+# Get Unique Years
 df["ExhibitionBeginDate"] = pd.to_datetime(df["ExhibitionBeginDate"], errors="coerce")
 df["Year"] = df["ExhibitionBeginDate"].dt.year
 years = sorted(df["Year"].dropna().unique().astype(int))
 
-# === Config ===
+# Config
 n_clusters = 4
 min_artists_per_year = 5
 all_memberships = []
 
-# === Normalize Name Helper ===
+# Normalize Name Helper
 def normalize_name(name):
     return name.strip().lower() if isinstance(name, str) else ""
 
-# === Loop Over Years ===
+# Loop Over Years
 for year in years:
     df_year = df[df["Year"] == year]
     if df_year.empty:
@@ -63,7 +63,7 @@ for year in years:
     memberships["Year"] = year
     all_memberships.append(memberships)
 
-# === Save Combined Data ===
+# Save Combined Data
 final_df = pd.concat(all_memberships, ignore_index=True)
 final_df.to_csv(output_file, index=False)
 print(f"Saved per-year fuzzy memberships to {output_file}")
