@@ -33,7 +33,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
     Promise.all([
       d3.csv('assets/MoMAExhibitions1929to1989_normalized.csv'),
-      d3.csv('assets/fuzzy_memberships_by_year.csv')
+      d3.csv('assets/fuzzy_memberships_postfiltered_exhibition_based.csv')
     ]).then(([rawData, fuzzyData]) => {
       const fuzzyMap = new Map<string, any>();
       fuzzyData.forEach(d => {
@@ -48,9 +48,16 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         const normalizedName = normalizeName(d['DisplayName']);
         const year = d['ExhibitionBeginDate'] ? new Date(d['ExhibitionBeginDate']).getFullYear() : null;
         const fuzzyKey = `${normalizedName}_${year}`;
-        const fuzzy = fuzzyMap.get(fuzzyKey) || {};
+        const fuzzy = fuzzyMap.get(fuzzyKey);
+
+        if (!fuzzy) return null; // Skip artists without fuzzy data
+        const fikVals = Object.keys(fuzzy).filter(k => k.startsWith('fik_C')).map(k => +fuzzy[k]);
+        const maxFik = Math.max(...fikVals);
+        const fuzziness = 1 - maxFik;
+
         return { ...d, Year: year, ...fuzzy };
-      });
+      }).filter(d => d !== null);
+
 
       this.updateVisualization();
     }).catch(error => console.error('Error loading CSVs:', error));
@@ -102,7 +109,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const height = 900;
     const nodeRadius = 3;
     const layoutRadius = 300;
-    const fuzzinessThreshold = 0.4;
+    const fuzzinessThreshold = 0.1;
 
     // === Organize artist nodes by exhibition title ===
     const exhibitionMap = new Map<string, ArtistNode[]>();
@@ -409,7 +416,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       })
       .on("mouseout", () => tooltip1.style("opacity", 0));
 
-// === Remove axis ticks ===
+    // === Remove axis ticks ===
     lineSvg.append("g")
       .attr("transform", `translate(0,${lineHeight - lineMargin.bottom})`)
       .call(d3.axisBottom(x).tickFormat(() => "").ticks(0));
