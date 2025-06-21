@@ -259,8 +259,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const onlyCommunity = [...uniqueCommunities][0] ?? "C1";
     const hasFuzzyNodes = allNodes.some(n => n.fuzziness && n.fuzziness > fuzzinessThreshold);
 
-    // === Draw edges (solid or dashed) ===
-    g.selectAll("line.link")
+    // === Draw artist nodes ===
+    const linkElements = g.selectAll("line.link")
       .data(links)
       .enter()
       .append("line")
@@ -269,12 +269,11 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("y1", d => d.source.y)
       .attr("x2", d => d.target.x)
       .attr("y2", d => d.target.y)
-      .attr("stroke", d => color(d.source.predominantCommunity || "C1"))
+      .attr("stroke", "black")
       .attr("stroke-dasharray", d => d.source.fuzziness && d.source.fuzziness > fuzzinessThreshold ? "3,2" : "0")
       .attr("stroke-width", 1);
 
-    // === Draw artist nodes ===
-    g.selectAll("circle.node")
+    const nodeElements = g.selectAll("circle.node")
       .data(allNodes)
       .enter()
       .append("circle")
@@ -303,7 +302,41 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       })
       .on("mouseout", () => {
         tooltip.style("opacity", 0);
+      })
+      .on("click", function (event, clickedNode) {
+        event.stopPropagation();
+
+        const connectedIds = new Set<string>();
+        links.forEach(link => {
+          if (link.source.id === clickedNode.id) {
+            connectedIds.add(link.target.id);
+          } else if (link.target.id === clickedNode.id) {
+            connectedIds.add(link.source.id);
+          }
+        });
+        connectedIds.add(clickedNode.id);
+        linkElements
+          .attr("stroke-opacity", d =>
+            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 1 : 0.1)
+          .attr("stroke-width", d =>
+            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 2 : 1);
+
+        nodeElements
+          .attr("opacity", d => connectedIds.has(d.id) ? 1 : 0.2);
       });
+
+    // === Reset on background click ===
+    svg.on("click", (event) => {
+      if ((event.target as SVGElement).tagName === "circle") return;
+
+      linkElements
+        .attr("stroke-opacity", 1)
+        .attr("stroke-width", 1);
+
+      nodeElements
+        .attr("opacity", 1);
+    });
+
 
     // === Centered line chart for exhibitions per year ===
     const yearsMap = d3.rollup(this.csvData, v => v.length, d => +d['Year']);
