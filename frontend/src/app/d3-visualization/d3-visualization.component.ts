@@ -50,7 +50,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         const fuzzyKey = `${normalizedName}_${year}`;
         const fuzzy = fuzzyMap.get(fuzzyKey);
 
-        if (!fuzzy) return null; // Skip artists without fuzzy data
+        if (!fuzzy) return null;
         const fikVals = Object.keys(fuzzy).filter(k => k.startsWith('fik_C')).map(k => +fuzzy[k]);
         const maxFik = Math.max(...fikVals);
         const fuzziness = 1 - maxFik;
@@ -66,7 +66,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
-    // === Artist node structure definition ===
     interface ArtistNode {
       id: string;
       name: string;
@@ -78,23 +77,20 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       fik?: number[];
     }
 
-    // === Filter CSV data for the selected year ===
     const filteredData = this.csvData.filter(d => {
       const year = d['ExhibitionBeginDate'] ? new Date(d['ExhibitionBeginDate']).getFullYear() : null;
       return year === this.pickedYear;
     });
 
     const chartContainer = d3.select<HTMLElement, unknown>(this.chartContainer.nativeElement);
-    chartContainer.html(""); // Clear previous render
+    chartContainer.html("");
 
     if (filteredData.length === 0) {
       chartContainer.append("p").text("No exhibitions found for this year.").style("color", "red");
       return;
     }
 
-    // === Tooltip setup ===
-    const tooltip = chartContainer
-      .append("div")
+    const tooltip = chartContainer.append("div")
       .style("position", "absolute")
       .style("padding", "4px 8px")
       .style("background", "white")
@@ -109,36 +105,42 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const height = 900;
     const nodeRadius = 3;
     const layoutRadius = 300;
-    const fuzzinessThreshold = 0.1;
 
-    // === Organize artist nodes by exhibition title ===
-    const exhibitionMap = new Map<string, ArtistNode[]>();
+    const artistNodeMap = new Map<string, ArtistNode>();
+    const exhibitionMap = new Map<string, Set<string>>();
+
     filteredData.forEach(d => {
-      const id = `${d['DisplayName']}_${d['ExhibitionTitle']}`;
-      const fikKeys = Object.keys(d).filter(k => k.startsWith("fik_C"));
-      const fikValues = fikKeys.map(k => +d[k]);
-      const maxFik = Math.max(...fikValues);
-      const predominantIndex = fikValues.indexOf(maxFik);
-      const predominantCommunity = `C${predominantIndex + 1}`;
-      const fuzziness = 1 - maxFik;
+      const name = d['DisplayName'];
+      const exhibitions = d['ExhibitionTitle'].split("|").map((e: string) => e.trim());
+      const isFuzzy = d['IsFuzzy'] === "True";
+      const id = name;
 
-      if (!exhibitionMap.has(d['ExhibitionTitle'])) {
-        exhibitionMap.set(d['ExhibitionTitle'], []);
+      if (!artistNodeMap.has(id)) {
+        const fikKeys = Object.keys(d).filter(k => k.startsWith("fik_C"));
+        const fikValues = fikKeys.map(k => +d[k]);
+        const maxFik = Math.max(...fikValues);
+        const predominantIndex = fikValues.indexOf(maxFik);
+        const predominantCommunity = `C${predominantIndex + 1}`;
+        const fuzziness = isFuzzy ? 1 : 0;
+
+        artistNodeMap.set(id, {
+          id,
+          name,
+          exhibition: exhibitions.join("|"),
+          x: 0,
+          y: 0,
+          predominantCommunity,
+          fuzziness,
+          fik: fikValues
+        });
       }
 
-      exhibitionMap.get(d['ExhibitionTitle'])!.push({
-        id,
-        name: d['DisplayName'],
-        exhibition: d['ExhibitionTitle'],
-        x: 0,
-        y: 0,
-        predominantCommunity,
-        fuzziness,
-        fik: fikValues
+      exhibitions.forEach((ex: string) => {
+        if (!exhibitionMap.has(ex)) exhibitionMap.set(ex, new Set());
+        exhibitionMap.get(ex)!.add(id);
       });
     });
 
-    // === Layout centers for each exhibition group ===
     const exhibitions = Array.from(exhibitionMap.keys());
     const clusterCenters = new Map<string, { x: number; y: number }>();
     exhibitions.forEach((ex, i) => {
@@ -149,8 +151,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     });
 
-    // === Scale cluster radius by size of group ===
-    const groupSizes = Array.from(exhibitionMap.values()).map(nodes => nodes.length);
+    const groupSizes = Array.from(exhibitionMap.values()).map(set => set.size);
     const minSize = d3.min(groupSizes)!;
     const maxSize = d3.max(groupSizes)!;
     const radiusScale = d3.scaleLinear().domain([minSize, maxSize]).range([30, 100]);
@@ -158,16 +159,20 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const allNodes: ArtistNode[] = [];
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
 
-    // === Layout core and fuzzy nodes ===
-    exhibitionMap.forEach((nodes, ex) => {
+    exhibitionMap.forEach((artistIds, ex) => {
       const center = clusterCenters.get(ex)!;
-      const thisClusterRadius = radiusScale(nodes.length);
+      const thisClusterRadius = radiusScale(artistIds.size);
 
-      const core = nodes.filter(n => n.fuzziness !== undefined && n.fuzziness < fuzzinessThreshold);
-      const fuzzy = nodes.filter(n => n.fuzziness !== undefined && n.fuzziness >= fuzzinessThreshold);
+      const core: ArtistNode[] = [];
+      const fuzzy: ArtistNode[] = [];
 
-      // === Place core nodes randomly inside cluster circle ===
-      core.forEach((node) => {
+      artistIds.forEach(id => {
+        const node = artistNodeMap.get(id)!;
+        if (node.fuzziness === 0) core.push(node);
+        else fuzzy.push(node);
+      });
+
+      core.forEach(node => {
         const angle = Math.random() * 2 * Math.PI;
         const radius = Math.sqrt(Math.random()) * thisClusterRadius;
         node.x = center.x + Math.cos(angle) * radius;
@@ -175,23 +180,18 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         allNodes.push(node);
       });
 
-      // === Place fuzzy nodes by averaging community cluster centers ===
-      fuzzy.forEach(fuzzy => {
-        if (!fuzzy.fik || fuzzy.fik.length === 0 || fuzzy.fik.every(val => isNaN(val))) {
-          fuzzy.x = width / 2 + Math.random() * 100 - 50;
-          fuzzy.y = height / 2 + Math.random() * 100 - 50;
-          allNodes.push(fuzzy);
-          return;
-        }
+      const linkSet = new Set<string>();
 
+      fuzzy.forEach(fuzzy => {
         const contributingCenters: { x: number; y: number }[] = [];
-        fuzzy.fik.forEach((w, i) => {
+
+        fuzzy.fik?.forEach((w, i) => {
           if (w > 0.1) {
-            const c = `C${i + 1}`;
-            for (const [ex2, center2] of clusterCenters) {
-              if (exhibitionMap.get(ex2)!.some(n => n.predominantCommunity === c)) {
+            const community = `C${i + 1}`;
+            for (const [ex2, ids] of exhibitionMap.entries()) {
+              const center2 = clusterCenters.get(ex2)!;
+              if ([...ids].some(id => artistNodeMap.get(id)?.predominantCommunity === community)) {
                 contributingCenters.push(center2);
-                break;
               }
             }
           }
@@ -200,17 +200,55 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         if (contributingCenters.length > 0) {
           const avgX = d3.mean(contributingCenters, c => c.x)!;
           const avgY = d3.mean(contributingCenters, c => c.y)!;
-          fuzzy.x = avgX + Math.random() * 50 - 25;
-          fuzzy.y = avgY + Math.random() * 50 - 25;
+          const jitter = () => Math.random() * 30 - 10;
+          fuzzy.x = avgX + jitter();
+          fuzzy.y = avgY + jitter();
         } else {
           fuzzy.x = width / 2 + Math.random() * 100 - 50;
           fuzzy.y = height / 2 + Math.random() * 100 - 50;
         }
 
         allNodes.push(fuzzy);
+
+        const usedCoreTargets = new Set<string>();
+        const exhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
+
+        exhibitions.forEach(ex => {
+          const group = exhibitionMap.get(ex);
+          if (!group) return;
+
+          let closest: ArtistNode | null = null;
+          let minDist = Infinity;
+
+          for (const otherId of group) {
+            if (otherId === fuzzy.id) continue;
+
+            const other = artistNodeMap.get(otherId)!;
+
+            if (other.fuzziness === 0 && !usedCoreTargets.has(other.id)) {
+              const dx = fuzzy.x - other.x;
+              const dy = fuzzy.y - other.y;
+              const dist = dx * dx + dy * dy;
+
+              if (dist < minDist) {
+                minDist = dist;
+                closest = other;
+              }
+            }
+          }
+
+          if (closest && closest.id !== fuzzy.id && !usedCoreTargets.has(closest.id)) {
+            const key = `${fuzzy.id}→${closest.id}`;
+            if (!linkSet.has(key)) {
+              links.push({ source: fuzzy, target: closest });
+              linkSet.add(key);
+              usedCoreTargets.add(closest.id);
+            }
+          }
+        });
       });
 
-      // === Create links between all core members in same group ===
+
       for (let i = 0; i < core.length; i++) {
         for (let j = i + 1; j < core.length; j++) {
           links.push({ source: core[i], target: core[j] });
@@ -218,19 +256,13 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       }
     });
 
-    // === Add fuzzy node links to strongest matching community core ===
-    const fuzzyOnly = allNodes.filter(n => n.fuzziness && n.fuzziness >= fuzzinessThreshold);
-    fuzzyOnly.forEach(fuzzy => {
-      fuzzy.fik!.forEach((w, i) => {
-        if (w > 0.1) {
-          const c = `C${i + 1}`;
-          const target = allNodes.find(n => n.predominantCommunity === c && n.fuzziness! < fuzzinessThreshold);
-          if (target) links.push({ source: fuzzy, target });
-        }
-      });
+    const seen = new Set<string>();
+    const uniqueNodes = allNodes.filter(n => {
+      if (seen.has(n.id)) return false;
+      seen.add(n.id);
+      return true;
     });
 
-    // === SVG container setup ===
     const svg = chartContainer.append("svg")
       .attr("width", width)
       .attr("height", height)
@@ -239,17 +271,14 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const defs = svg.append("defs");
     const g = svg.append("g");
 
-    // === Community color scale ===
     const color = d3.scaleOrdinal<string>()
-      .domain(["C1", "C2", "C3", "C4", "C5", "C6"])
+      .domain(["C1", "C2", "C3", "C4", "C5", "C6", "C7",  "C8",  "C9",  "C10", ])
       .range(d3.schemeCategory10);
 
-    // === Helper to generate unique gradient IDs ===
     const sanitizeId = (str: string) => str.normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-zA-Z0-9_-]/g, "_");
 
-    // === Gradient fill generator for fuzzy nodes ===
     function createRadialGradient(d: ArtistNode, baseColor: string): string {
       const gradientId = `gradient-${sanitizeId(d.id)}`;
       if (!defs.select(`#${gradientId}`).empty()) return `url(#${gradientId})`;
@@ -260,13 +289,10 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       return `url(#${gradientId})`;
     }
 
-    // === Color unification for single-community views ===
-    const uniqueCommunities = new Set(allNodes.map(n => n.predominantCommunity));
+    const uniqueCommunities = new Set(uniqueNodes.map(n => n.predominantCommunity));
     const isSingleCommunity = uniqueCommunities.size === 1;
     const onlyCommunity = [...uniqueCommunities][0] ?? "C1";
-    const hasFuzzyNodes = allNodes.some(n => n.fuzziness && n.fuzziness > fuzzinessThreshold);
 
-    // === Draw artist nodes ===
     const linkElements = g.selectAll("line.link")
       .data(links)
       .enter()
@@ -277,11 +303,16 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("x2", d => d.target.x)
       .attr("y2", d => d.target.y)
       .attr("stroke", "black")
-      .attr("stroke-dasharray", d => d.source.fuzziness && d.source.fuzziness > fuzzinessThreshold ? "3,2" : "0")
-      .attr("stroke-width", 1);
+      .attr("stroke-dasharray", d =>
+        (d.source.fuzziness ?? 0) > 0 || (d.target.fuzziness ?? 0) > 0 ? "3,2" : "0"
+      )
+      .attr("stroke-opacity", d =>
+        d.source === d.target ? 0.3 : 1
+      )
+      .attr("stroke-width", d => d.source === d.target ? 0.3 : 0.1);
 
     const nodeElements = g.selectAll("circle.node")
-      .data(allNodes)
+      .data(uniqueNodes)
       .enter()
       .append("circle")
       .attr("class", "node")
@@ -289,61 +320,47 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("cx", d => d.x)
       .attr("cy", d => d.y)
       .attr("fill", d => {
-        const baseColor = isSingleCommunity
-          ? color(onlyCommunity)
-          : color(d.predominantCommunity || "C1");
-
-        return hasFuzzyNodes && d.fuzziness && d.fuzziness > fuzzinessThreshold
-          ? createRadialGradient(d, baseColor)
-          : baseColor;
+        const baseColor = isSingleCommunity ? color(onlyCommunity) : color(uniqueCommunities.has(d.predominantCommunity) ? d.predominantCommunity! : "C1");
+        return d.fuzziness && d.fuzziness > 0 ? createRadialGradient(d, baseColor) : baseColor;
       })
+      .attr("stroke", d => d.fuzziness && d.fuzziness > 0 ? "#444" : "none")
+      .attr("stroke-width", d => d.fuzziness && d.fuzziness > 0 ? 1 : 0)
       .on("mouseover", (event, d) => {
         tooltip
           .style("opacity", 1)
-          .html(`<strong>${d.name}</strong>`);
+          .html(`<strong>${d.name}</strong><br><em>${d.exhibition}</em>`);
       })
-      .on("mousemove", (event) => {
-        tooltip
-          .style("left", (event.pageX + 10) + "px")
-          .style("top", (event.pageY - 20) + "px");
+      .on("mousemove", event => {
+        tooltip.style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 20) + "px");
       })
-      .on("mouseout", () => {
-        tooltip.style("opacity", 0);
-      })
+      .on("mouseout", () => tooltip.style("opacity", 0))
       .on("click", function (event, clickedNode) {
         event.stopPropagation();
 
         const connectedIds = new Set<string>();
         links.forEach(link => {
-          if (link.source.id === clickedNode.id) {
-            connectedIds.add(link.target.id);
-          } else if (link.target.id === clickedNode.id) {
-            connectedIds.add(link.source.id);
-          }
+          if (link.source.id === clickedNode.id) connectedIds.add(link.target.id);
+          else if (link.target.id === clickedNode.id) connectedIds.add(link.source.id);
         });
         connectedIds.add(clickedNode.id);
+
         linkElements
           .attr("stroke-opacity", d =>
-            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 1 : 0.1)
+            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 1 : 0.1
+          )
           .attr("stroke-width", d =>
-            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 2 : 1);
+            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 0.5 : 0.1
+          );
 
-        nodeElements
-          .attr("opacity", d => connectedIds.has(d.id) ? 1 : 0.2);
+        nodeElements.attr("opacity", d => connectedIds.has(d.id) ? 1 : 0.1);
       });
 
-    // === Reset on background click ===
-    svg.on("click", (event) => {
+    svg.on("click", event => {
       if ((event.target as SVGElement).tagName === "circle") return;
 
-      linkElements
-        .attr("stroke-opacity", 1)
-        .attr("stroke-width", 1);
-
-      nodeElements
-        .attr("opacity", 1);
+      linkElements.attr("stroke-opacity", 1).attr("stroke-width", 0.1);
+      nodeElements.attr("opacity", 1);
     });
-
 
     // === Centered line chart for exhibitions per year ===
     const yearsMap = d3.rollup(this.csvData, v => v.length, d => +d['Year']);
@@ -381,10 +398,10 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .datum(lineData)
       .attr("fill", "none")
       .attr("stroke", "#007acc")
-      .attr("stroke-width", 2)
+      .attr("stroke-width", 0.5)
       .attr("d", line);
 
-// === Add dots with tooltips ===
+    // === Add dots with tooltips ===
     const tooltip1 = chartContainer.append("div")
       .style("position", "absolute")
       .style("padding", "4px 8px")
@@ -416,7 +433,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       })
       .on("mouseout", () => tooltip1.style("opacity", 0));
 
-    // === Remove axis ticks ===
     lineSvg.append("g")
       .attr("transform", `translate(0,${lineHeight - lineMargin.bottom})`)
       .call(d3.axisBottom(x).tickFormat(() => "").ticks(0));
@@ -426,9 +442,47 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .call(d3.axisLeft(y).tickFormat(() => "").ticks(0));
 
 
-    // === Enable zooming and panning ===
-    svg.call(d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 5])
-      .on("zoom", event => g.attr("transform", event.transform)));
+    const linkVisibilityThreshold = 1;
+    let currentTransform: d3.ZoomTransform = d3.zoomIdentity;
+
+    function updateLinkVisibility() {
+      if (!linkElements) return;
+
+      const scale = currentTransform.k;
+
+      if (scale < linkVisibilityThreshold) {
+        linkElements.attr("display", "none");
+        return;
+      }
+
+      const [tx, ty] = [currentTransform.x, currentTransform.y];
+      const scaleInv = 1 / scale;
+
+      const viewX0 = -tx * scaleInv;
+      const viewY0 = -ty * scaleInv;
+      const viewX1 = viewX0 + width * scaleInv;
+      const viewY1 = viewY0 + height * scaleInv;
+
+      linkElements.attr("display", d => {
+        const inView =
+          d.source.x >= viewX0 && d.source.x <= viewX1 &&
+          d.source.y >= viewY0 && d.source.y <= viewY1 &&
+          d.target.x >= viewX0 && d.target.x <= viewX1 &&
+          d.target.y >= viewY0 && d.target.y <= viewY1;
+
+        return inView ? "inline" : "none";
+      });
+    }
+
+    svg.call(
+      d3.zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.5, 5])
+        .on("zoom", event => {
+          currentTransform = event.transform;
+          g.attr("transform", currentTransform.toString());
+          updateLinkVisibility();
+        })
+    );
+
   }
 }
