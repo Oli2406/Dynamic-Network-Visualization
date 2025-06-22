@@ -182,19 +182,13 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
       const linkSet = new Set<string>();
 
-      fuzzy.forEach(fuzzy => {
+      fuzzy.forEach((fuzzy: ArtistNode) => {
         const contributingCenters: { x: number; y: number }[] = [];
 
-        fuzzy.fik?.forEach((w, i) => {
-          if (w > 0.1) {
-            const community = `C${i + 1}`;
-            for (const [ex2, ids] of exhibitionMap.entries()) {
-              const center2 = clusterCenters.get(ex2)!;
-              if ([...ids].some(id => artistNodeMap.get(id)?.predominantCommunity === community)) {
-                contributingCenters.push(center2);
-              }
-            }
-          }
+        const fuzzyExhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
+        fuzzyExhibitions.forEach(ex => {
+          const center = clusterCenters.get(ex);
+          if (center) contributingCenters.push(center);
         });
 
         if (contributingCenters.length > 0) {
@@ -248,7 +242,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         });
       });
 
-
       for (let i = 0; i < core.length; i++) {
         for (let j = i + 1; j < core.length; j++) {
           links.push({ source: core[i], target: core[j] });
@@ -272,7 +265,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const g = svg.append("g");
 
     const color = d3.scaleOrdinal<string>()
-      .domain(["C1", "C2", "C3", "C4", "C5", "C6", "C7",  "C8",  "C9",  "C10", ])
+      .domain(["C1", "C2", "C3", "C4", "C5", "C6" ])
       .range(d3.schemeCategory10);
 
     const sanitizeId = (str: string) => str.normalize("NFD")
@@ -320,11 +313,13 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("cx", d => d.x)
       .attr("cy", d => d.y)
       .attr("fill", d => {
-        const baseColor = isSingleCommunity ? color(onlyCommunity) : color(uniqueCommunities.has(d.predominantCommunity) ? d.predominantCommunity! : "C1");
-        return d.fuzziness && d.fuzziness > 0 ? createRadialGradient(d, baseColor) : baseColor;
+        const baseColor = color(d.exhibition.split("|")[0]);
+        return d.fuzziness && d.fuzziness > 0
+          ? createRadialGradient(d, baseColor)
+          : baseColor;
       })
-      .attr("stroke", d => d.fuzziness && d.fuzziness > 0 ? "#444" : "none")
-      .attr("stroke-width", d => d.fuzziness && d.fuzziness > 0 ? 1 : 0)
+      .attr("stroke", "none")
+      .attr("stroke-width", 0)
       .on("mouseover", (event, d) => {
         tooltip
           .style("opacity", 1)
