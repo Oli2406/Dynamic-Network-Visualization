@@ -158,7 +158,10 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
     const allNodes: ArtistNode[] = [];
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
+    const linkSet = new Set<string>();
 
+
+    // === Layout and core-core linking ===
     exhibitionMap.forEach((artistIds, ex) => {
       const center = clusterCenters.get(ex)!;
       const thisClusterRadius = radiusScale(artistIds.size);
@@ -172,6 +175,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         else fuzzy.push(node);
       });
 
+      // Position core nodes
       core.forEach(node => {
         const angle = Math.random() * 2 * Math.PI;
         const radius = Math.sqrt(Math.random()) * thisClusterRadius;
@@ -180,74 +184,82 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         allNodes.push(node);
       });
 
-      const linkSet = new Set<string>();
-
-      fuzzy.forEach((fuzzy: ArtistNode) => {
-        const contributingCenters: { x: number; y: number }[] = [];
-
+      // Position fuzzy nodes near their exhibition centers (average)
+      fuzzy.forEach(fuzzy => {
         const fuzzyExhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
-        fuzzyExhibitions.forEach(ex => {
-          const center = clusterCenters.get(ex);
-          if (center) contributingCenters.push(center);
-        });
+        const contributingCenters = fuzzyExhibitions.map(e => clusterCenters.get(e)).filter(Boolean) as { x: number, y: number }[];
 
         if (contributingCenters.length > 0) {
           const avgX = d3.mean(contributingCenters, c => c.x)!;
           const avgY = d3.mean(contributingCenters, c => c.y)!;
-          const jitter = () => Math.random() * 30 - 10;
+          const jitter = () => Math.random() * 20 - 10;
           fuzzy.x = avgX + jitter();
           fuzzy.y = avgY + jitter();
         } else {
-          fuzzy.x = width / 2 + Math.random() * 100 - 50;
-          fuzzy.y = height / 2 + Math.random() * 100 - 50;
+          fuzzy.x = width / 2;
+          fuzzy.y = height / 2;
         }
 
         allNodes.push(fuzzy);
-
-        const usedCoreTargets = new Set<string>();
-        const exhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
-
-        exhibitions.forEach(ex => {
-          const group = exhibitionMap.get(ex);
-          if (!group) return;
-
-          let closest: ArtistNode | null = null;
-          let minDist = Infinity;
-
-          for (const otherId of group) {
-            if (otherId === fuzzy.id) continue;
-
-            const other = artistNodeMap.get(otherId)!;
-
-            if (other.fuzziness === 0 && !usedCoreTargets.has(other.id)) {
-              const dx = fuzzy.x - other.x;
-              const dy = fuzzy.y - other.y;
-              const dist = dx * dx + dy * dy;
-
-              if (dist < minDist) {
-                minDist = dist;
-                closest = other;
-              }
-            }
-          }
-
-          if (closest && closest.id !== fuzzy.id && !usedCoreTargets.has(closest.id)) {
-            const key = `${fuzzy.id}→${closest.id}`;
-            if (!linkSet.has(key)) {
-              links.push({ source: fuzzy, target: closest });
-              linkSet.add(key);
-              usedCoreTargets.add(closest.id);
-            }
-          }
-        });
       });
 
+      // Link core-core nodes
       for (let i = 0; i < core.length; i++) {
         for (let j = i + 1; j < core.length; j++) {
           links.push({ source: core[i], target: core[j] });
         }
       }
     });
+
+// === Fuzzy node linking pass ===
+    allNodes.forEach(fuzzy => {
+      if (fuzzy.fuzziness !== 1) return;
+
+      const exhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
+      const linkedExhibitions = new Set<string>();
+
+      exhibitions.forEach(ex => {
+        if (linkedExhibitions.has(ex)) return;
+
+        const group = exhibitionMap.get(ex);
+        if (!group) return;
+
+        let closest: ArtistNode | undefined;
+        let minDist = Infinity;
+
+        group.forEach(id => {
+          const other = artistNodeMap.get(id);
+          if (!other || other.id === fuzzy.id || other.fuzziness !== 0) return;
+
+          const dx = fuzzy.x - other.x;
+          const dy = fuzzy.y - other.y;
+          const dist = dx * dx + dy * dy;
+
+          if (dist < minDist) {
+            minDist = dist;
+            closest = other;
+          }
+        });
+
+        if (closest) {
+          const key = `${fuzzy.id}→${closest.id}`;
+          if (!linkSet.has(key)) {
+            links.push({ source: fuzzy, target: closest });
+            linkSet.add(key);
+            linkedExhibitions.add(ex);
+
+            console.log(`Linked fuzzy node "${fuzzy.name}" to closest core in "${ex}" → ${closest.name}`);
+          } else {
+            console.warn(`Duplicate link ignored: ${key}`);
+          }
+        }
+      });
+
+      console.log(
+        `Fuzzy node "${fuzzy.name}" expected ${exhibitions.length} links, created ${linkedExhibitions.size}`
+      );
+    });
+
 
     const seen = new Set<string>();
     const uniqueNodes = allNodes.filter(n => {
