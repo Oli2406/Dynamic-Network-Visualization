@@ -63,6 +63,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     }).catch(error => console.error('Error loading CSVs:', error));
   }
 
+  // TODO: group non fuzzy exhibits (more space), LOD aggregation for huge groups needed
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
@@ -103,7 +104,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
     const width = 1920;
     const height = 680;
-    const nodeRadius = 3;
+    const nodeRadius = 4;
     const layoutRadius = 300;
 
     const artistNodeMap = new Map<string, ArtistNode>();
@@ -192,7 +193,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         if (contributingCenters.length > 0) {
           const avgX = d3.mean(contributingCenters, c => c.x)!;
           const avgY = d3.mean(contributingCenters, c => c.y)!;
-          const jitter = () => Math.random() * 20 - 10;
+          const jitter = () => Math.random() * 40 - 10;
           fuzzy.x = avgX + jitter();
           fuzzy.y = avgY + jitter();
         } else {
@@ -247,11 +248,11 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
             links.push({ source: fuzzy, target: closest });
             linkSet.add(key);
             linkedExhibitions.add(ex);
+
           }
         }
       });
     });
-
 
     const seen = new Set<string>();
     const uniqueNodes = allNodes.filter(n => {
@@ -276,13 +277,32 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-zA-Z0-9_-]/g, "_");
 
-    function createRadialGradient(d: ArtistNode, baseColor: string): string {
+    function createRadialGradient(d: ArtistNode, colorFn: (c: string) => string): string {
       const gradientId = `gradient-${sanitizeId(d.id)}`;
       if (!defs.select(`#${gradientId}`).empty()) return `url(#${gradientId})`;
 
-      const grad = defs.append("radialGradient").attr("id", gradientId);
-      grad.append("stop").attr("offset", "0%").attr("stop-color", "#fff");
-      grad.append("stop").attr("offset", "100%").attr("stop-color", baseColor);
+      const grad = defs.append("radialGradient")
+        .attr("id", gradientId)
+        .attr("fx", "50%").attr("fy", "50%");
+
+      const exhibitions = d.exhibition.split("|").map(e => e.trim());
+      const numColors = exhibitions.length;
+
+      exhibitions.forEach((ex, i) => {
+        const offsetStart = (i / numColors) * 100;
+        const offsetEnd = ((i + 1) / numColors) * 100;
+        const stopColor = colorFn(ex);
+
+        grad.append("stop")
+          .attr("offset", `${offsetStart}%`)
+          .attr("stop-color", stopColor)
+          .attr("stop-opacity", 0.2);
+
+        grad.append("stop")
+          .attr("offset", `${offsetEnd}%`)
+          .attr("stop-color", stopColor)
+          .attr("stop-opacity", 1);
+      });
       return `url(#${gradientId})`;
     }
 
@@ -319,7 +339,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("fill", d => {
         const baseColor = color(d.exhibition.split("|")[0]);
         return d.fuzziness && d.fuzziness > 0
-          ? createRadialGradient(d, baseColor)
+          ? createRadialGradient(d, ex => color(ex))
           : baseColor;
       })
       .attr("stroke", "none")
@@ -337,22 +357,61 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         event.stopPropagation();
 
         const connectedIds = new Set<string>();
-        links.forEach(link => {
-          if (link.source.id === clickedNode.id) connectedIds.add(link.target.id);
-          else if (link.target.id === clickedNode.id) connectedIds.add(link.source.id);
-        });
-        connectedIds.add(clickedNode.id);
+        const relevantLinks: typeof links = [];
+
+        if (clickedNode.fuzziness === 1) {
+          const directlyLinkedCores: ArtistNode[] = [];
+
+          links.forEach(link => {
+            const isFuzzyLink =
+              (link.source.id === clickedNode.id && link.target.fuzziness === 0) ||
+              (link.target.id === clickedNode.id && link.source.fuzziness === 0);
+
+            if (isFuzzyLink) {
+              relevantLinks.push(link);
+              connectedIds.add(link.source.id);
+              connectedIds.add(link.target.id);
+
+              const coreNode = link.source.fuzziness === 0 ? link.source : link.target;
+              directlyLinkedCores.push(coreNode);
+            }
+          });
+
+          directlyLinkedCores.forEach(coreNode => {
+            links.forEach(link => {
+              const isCoreCore =
+                link.source.fuzziness === 0 &&
+                link.target.fuzziness === 0 &&
+                (link.source.id === coreNode.id || link.target.id === coreNode.id);
+
+              if (isCoreCore) {
+                relevantLinks.push(link);
+                connectedIds.add(link.source.id);
+                connectedIds.add(link.target.id);
+              }
+            });
+          });
+
+        } else {
+          links.forEach(link => {
+            const isDirect =
+              (link.source.id === clickedNode.id || link.target.id === clickedNode.id);
+
+            if (isDirect) {
+              relevantLinks.push(link);
+              connectedIds.add(link.source.id);
+              connectedIds.add(link.target.id);
+            }
+          });
+        }
 
         linkElements
-          .attr("stroke-opacity", d =>
-            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 1 : 0.1
-          )
-          .attr("stroke-width", d =>
-            d.source.id === clickedNode.id || d.target.id === clickedNode.id ? 0.5 : 0.1
-          );
+          .attr("stroke-opacity", d => relevantLinks.includes(d) ? 1 : 0.05)
+          .attr("stroke-width", d => relevantLinks.includes(d) ? 0.5 : 0.1);
 
-        nodeElements.attr("opacity", d => connectedIds.has(d.id) ? 1 : 0.1);
+        nodeElements.attr("opacity", d => connectedIds.has(d.id) ? 1 : 0.05);
       });
+
 
     svg.on("click", event => {
       if ((event.target as SVGElement).tagName === "circle") return;
@@ -361,7 +420,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       nodeElements.attr("opacity", 1);
     });
 
-    // === Centered line chart for exhibitions per year ===
     const yearsMap = d3.rollup(this.csvData, v => v.length, d => +d['Year']);
     const lineData = Array.from(yearsMap.entries())
       .filter(([year]) => !isNaN(year))
