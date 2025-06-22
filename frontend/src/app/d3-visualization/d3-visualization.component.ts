@@ -101,8 +101,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .style("box-shadow", "0 2px 4px rgba(0,0,0,0.1)")
       .style("opacity", 0);
 
-    const width = 1300;
-    const height = 900;
+    const width = 1920;
+    const height = 680;
     const nodeRadius = 3;
     const layoutRadius = 300;
 
@@ -211,7 +211,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       }
     });
 
-// === Fuzzy node linking pass ===
+    // === Fuzzy node linking pass ===
     allNodes.forEach(fuzzy => {
       if (fuzzy.fuzziness !== 1) return;
 
@@ -247,17 +247,9 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
             links.push({ source: fuzzy, target: closest });
             linkSet.add(key);
             linkedExhibitions.add(ex);
-
-            console.log(`Linked fuzzy node "${fuzzy.name}" to closest core in "${ex}" → ${closest.name}`);
-          } else {
-            console.warn(`Duplicate link ignored: ${key}`);
           }
         }
       });
-
-      console.log(
-        `Fuzzy node "${fuzzy.name}" expected ${exhibitions.length} links, created ${linkedExhibitions.size}`
-      );
     });
 
 
