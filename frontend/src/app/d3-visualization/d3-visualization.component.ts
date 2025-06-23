@@ -71,7 +71,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     }).catch(error => console.error('Error loading CSVs:', error));
   }
 
-  // TODO: LOD aggregation for huge groups needed
+  // TODO: LOD aggregation for huge groups needed, vary radius based on number of groups
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
@@ -168,18 +168,27 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const currentMap = this.showOnlyFuzzyExhibitions ? filteredExhibitionMap : exhibitionMap;
     const currentExhibitions = Array.from(currentMap.keys());
 
-    console.log(this.showOnlyFuzzyExhibitions)
 
     const clusterCenters = new Map<string, { x: number; y: number }>();
+    const groupSizes = Array.from(exhibitionMap.values()).map(set => set.size);
+    const totalSize = d3.sum(groupSizes);
+    const groupAngleScales = groupSizes.map(size => (size / totalSize) * 2 * Math.PI);
+
+    const cumulativeAngles: number[] = [];
+    groupAngleScales.reduce((acc, angle, i) => {
+      cumulativeAngles[i] = acc;
+      return acc + angle;
+    }, 0);
+
     currentExhibitions.forEach((ex, i) => {
-      const angle = (2 * Math.PI * i) / currentExhibitions.length;
+      const angle = cumulativeAngles[i] + groupAngleScales[i] / 2;
       clusterCenters.set(ex, {
         x: width / 2 + Math.cos(angle) * layoutRadius,
         y: height / 2 + Math.sin(angle) * layoutRadius
       });
     });
 
-    const groupSizes = Array.from(exhibitionMap.values()).map(set => set.size);
+
     const minSize = d3.min(groupSizes)!;
     const maxSize = d3.max(groupSizes)!;
     const radiusScale = d3.scaleLinear().domain([minSize, maxSize]).range([30, 100]);
@@ -524,7 +533,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .call(d3.axisLeft(y).tickFormat(() => "").ticks(0));
 
 
-    const linkVisibilityThreshold = 1;
+    const linkVisibilityThreshold = 0.1;
     let currentTransform: d3.ZoomTransform = d3.zoomIdentity;
 
     function updateLinkVisibility() {
@@ -562,7 +571,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         .on("zoom", event => {
           currentTransform = event.transform;
           g.attr("transform", currentTransform.toString());
-          updateLinkVisibility();
+          // makes sure to only render visible links
+          //updateLinkVisibility();
         })
     );
   }
