@@ -18,6 +18,17 @@
     <button class="btn" (click)="updateYear(yearInput)"> Apply </button>
   </div>
 </div>
-<app-d3-visualization [pickedYear]="pickedYear"></app-d3-visualization>
+<label>
+  <input
+    type="checkbox"
+    [(ngModel)]="showOnlyFuzzyExhibitions"
+    (ngModelChange)="onFuzzyToggle($event)"
+  />
+  Show only fuzzy-linked exhibitions
+</label>
+<app-d3-visualization
+  [pickedYear]="pickedYear"
+  [showOnlyFuzzyExhibitions]="showOnlyFuzzyExhibitions">
+</app-d3-visualization>
 </body>
 </html>

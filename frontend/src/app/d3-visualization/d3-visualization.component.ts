@@ -9,6 +9,7 @@ import * as d3 from 'd3';
 })
 export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   @Input() pickedYear: number | null = 1929;
+  @Input() showOnlyFuzzyExhibitions: boolean = false;
   csvData: any[] = [];
   @ViewChild('chartContainer', { static: false }) chartContainer!: ElementRef;
 
@@ -21,7 +22,14 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges) {
-    if (changes['pickedYear'] && this.csvData.length > 0) {
+    const yearChanged = changes['pickedYear'];
+    const fuzzyToggleChanged = changes['showOnlyFuzzyExhibitions'];
+
+    const shouldUpdate =
+      (yearChanged && yearChanged.currentValue !== yearChanged.previousValue) ||
+      (fuzzyToggleChanged && !fuzzyToggleChanged.firstChange);
+
+    if (shouldUpdate && this.csvData.length > 0) {
       this.updateVisualization();
     }
   }
@@ -63,7 +71,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     }).catch(error => console.error('Error loading CSVs:', error));
   }
 
-  // TODO: group non fuzzy exhibits (more space), LOD aggregation for huge groups needed
+  // TODO: LOD aggregation for huge groups needed
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
@@ -81,6 +89,15 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const filteredData = this.csvData.filter(d => {
       const year = d['ExhibitionBeginDate'] ? new Date(d['ExhibitionBeginDate']).getFullYear() : null;
       return year === this.pickedYear;
+    });
+
+    const fuzzyExhibitions = new Set<string>();
+    filteredData.forEach(d => {
+      if (d['IsFuzzy'] === "True") {
+        d['ExhibitionTitle'].split("|").forEach((ex: string) => {
+          fuzzyExhibitions.add(ex.trim());
+        });
+      }
     });
 
     const chartContainer = d3.select<HTMLElement, unknown>(this.chartContainer.nativeElement);
@@ -142,10 +159,20 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     });
 
-    const exhibitions = Array.from(exhibitionMap.keys());
+
+
+    const filteredExhibitionMap = new Map(
+      Array.from(exhibitionMap.entries()).filter(([ex]) => fuzzyExhibitions.has(ex))
+    );
+
+    const currentMap = this.showOnlyFuzzyExhibitions ? filteredExhibitionMap : exhibitionMap;
+    const currentExhibitions = Array.from(currentMap.keys());
+
+    console.log(this.showOnlyFuzzyExhibitions)
+
     const clusterCenters = new Map<string, { x: number; y: number }>();
-    exhibitions.forEach((ex, i) => {
-      const angle = (2 * Math.PI * i) / exhibitions.length;
+    currentExhibitions.forEach((ex, i) => {
+      const angle = (2 * Math.PI * i) / currentExhibitions.length;
       clusterCenters.set(ex, {
         x: width / 2 + Math.cos(angle) * layoutRadius,
         y: height / 2 + Math.sin(angle) * layoutRadius
@@ -161,12 +188,10 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
     const linkSet = new Set<string>();
 
-
     // === Layout and core-core linking ===
-    exhibitionMap.forEach((artistIds, ex) => {
+    currentMap.forEach((artistIds, ex) => {
       const center = clusterCenters.get(ex)!;
       const thisClusterRadius = radiusScale(artistIds.size);
-
       const core: ArtistNode[] = [];
       const fuzzy: ArtistNode[] = [];
 
@@ -540,6 +565,5 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
           updateLinkVisibility();
         })
     );
-
   }
 }
