@@ -295,8 +295,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const g = svg.append("g");
 
     const color = d3.scaleOrdinal<string>()
-      .domain(["C1", "C2", "C3", "C4", "C5", "C6" ])
-      .range(d3.schemeCategory10);
+      .domain(["C1", "C2", "C3", "C4", "C5", "C6"])
+      .range(d3.schemeSet1);
 
     const sanitizeId = (str: string) => str.normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
