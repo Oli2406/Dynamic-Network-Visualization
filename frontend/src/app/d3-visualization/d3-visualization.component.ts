@@ -76,7 +76,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     }).catch(error => console.error('Error loading CSVs:', error));
   }
 
-  // TODO: LOD aggregation for huge groups needed, vary radius based on number of groups
   updateVisualization() {
     if (!this.pickedYear || this.csvData.length === 0) return;
 
@@ -172,7 +171,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const currentExhibitions = Array.from(currentMap.keys());
 
 
-    const clusterCenters = new Map<string, { x: number; y: number }>();
     const groupSizes = Array.from(exhibitionMap.values()).map(set => set.size);
     const totalSize = d3.sum(groupSizes);
     const groupAngleScales = groupSizes.map(size => (size / totalSize) * 2 * Math.PI);
@@ -199,23 +197,54 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const totalCircumference = d3.sum(metaNodeRadii, r => 2 * r + paddingBetweenNodes);
     const layoutRadius = totalCircumference / (2 * Math.PI) + 50;
 
-    currentExhibitions.forEach((ex, i) => {
-      const angle = cumulativeAngles[i] + groupAngleScales[i] / 2;
-      clusterCenters.set(ex, {
-        x: width / 2 + Math.cos(angle) * layoutRadius,
-        y: height / 2 + Math.sin(angle) * layoutRadius
-      });
+    const metaNodes = currentExhibitions.map(ex => ({
+      id: ex,
+      radius: radiusScale(currentMap.get(ex)!.size),
+      x: width / 2,
+      y: height / 2
+    }));
+
+    const metaLinksMap = new Map<string, { source: string, target: string, value: number }>();
+    filteredData.forEach(d => {
+      if (d['IsFuzzy'] === "True") {
+        const exhibitions = d['ExhibitionTitle'].split("|").map((e: string) => e.trim());
+        for (let i = 0; i < exhibitions.length; i++) {
+          for (let j = i + 1; j < exhibitions.length; j++) {
+            const pairKey = [exhibitions[i], exhibitions[j]].sort().join("→");
+            if (!metaLinksMap.has(pairKey)) {
+              metaLinksMap.set(pairKey, { source: exhibitions[i], target: exhibitions[j], value: 0 });
+            }
+            metaLinksMap.get(pairKey)!.value += 1;
+          }
+        }
+      }
     });
+
+    const metaLinks = Array.from(metaLinksMap.values());
+
+    const simulation = d3.forceSimulation(metaNodes)
+      .force("link", d3.forceLink(metaLinks).id(d => (d as ArtistNode).id).strength(d => Math.min(1, d.value / 5)))
+      .force("collide", d3.forceCollide().radius(d => ((d as ArtistNode).radius ?? 0) + 50))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .stop();
+
+    for (let i = 0; i < 300; ++i) simulation.tick();
+
+    const clusterCenters = new Map<string, { x: number; y: number }>();
+    metaNodes.forEach(node => {
+      clusterCenters.set(node.id, { x: node.x, y: node.y });
+    });
+
 
     const allNodes: ArtistNode[] = [];
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
     const linkSet = new Set<string>();
     const aggregatedExhibitions = new Set<string>();
 
-    // === Layout and core-core linking ===
     currentMap.forEach((artistIds, ex) => {
       const center = clusterCenters.get(ex)!;
 
+      // Split into core and fuzzy artists
       const core: ArtistNode[] = [];
       const fuzzy: ArtistNode[] = [];
 
@@ -228,7 +257,11 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       const metaNodeRadius = radiusScale(artistIds.size);
       const aggregationThreshold = 60;
 
-      if (this.aggregationMode === "aggregateDisjoint") {
+      // === Aggregation Mode: Always aggregate
+      if (this.aggregationMode === "aggregateDisjoint" || artistIds.size > aggregationThreshold) {
+        aggregatedExhibitions.add(ex);
+
+        // Create meta node
         const metaNode: ArtistNode = {
           id: `meta-${ex}`,
           name: `Meta: ${ex}`,
@@ -242,16 +275,19 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         };
         allNodes.push(metaNode);
 
+        // Connect fuzzy nodes to meta node if they belong here
         fuzzy.forEach(fuzzyNode => {
-          const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
-          if (fuzzyExhibitions.includes(ex)) {
+          if (fuzzyNode.exhibition.split("|").includes(ex)) {
             links.push({ source: fuzzyNode, target: metaNode });
           }
         });
 
+        // Position fuzzy nodes near the cluster center(s)
         fuzzy.forEach(fuzzyNode => {
-          const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
-          const contributingCenters = fuzzyExhibitions.map(e => clusterCenters.get(e)).filter(Boolean) as { x: number, y: number }[];
+          const contributingCenters = fuzzyNode.exhibition
+            .split("|")
+            .map(e => clusterCenters.get(e))
+            .filter(Boolean) as { x: number; y: number }[];
 
           if (contributingCenters.length > 0) {
             const avgX = d3.mean(contributingCenters, c => c.x)!;
@@ -267,90 +303,72 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
           allNodes.push(fuzzyNode);
         });
 
-      } else {
-        if (artistIds.size > aggregationThreshold) {
-          aggregatedExhibitions.add(ex)
-          const metaNode: ArtistNode = {
-            id: `meta-${ex}`,
-            name: `Meta: ${ex}`,
+      }
+      else {
+        const thisClusterRadius = radiusScale(artistIds.size);
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+        if (core.length === 0 && fuzzy.length > 0) {
+          // Special case: cluster with only fuzzy nodes
+          // Add a meta/anchor node to act as center
+          const anchorNode: ArtistNode = {
+            id: `anchor-${ex}`,
+            name: `Anchor: ${ex}`,
             exhibition: ex,
             x: center.x,
             y: center.y,
             predominantCommunity: "Meta",
             fuzziness: 0,
             fik: [],
-            radius: metaNodeRadius
+            radius: thisClusterRadius * 0.5
           };
-          allNodes.push(metaNode);
+          allNodes.push(anchorNode);
 
+          // Link fuzzy nodes to anchor
           fuzzy.forEach(fuzzyNode => {
-            const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
-            if (fuzzyExhibitions.includes(ex)) {
-              links.push({ source: fuzzyNode, target: metaNode });
-            }
+            links.push({ source: fuzzyNode, target: anchorNode });
           });
-
-          fuzzy.forEach(fuzzyNode => {
-            const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
-            const contributingCenters = fuzzyExhibitions
-              .map(e => clusterCenters.get(e))
-              .filter(Boolean) as { x: number, y: number }[];
-
-            if (contributingCenters.length > 0) {
-              const avgX = d3.mean(contributingCenters, c => c.x)!;
-              const avgY = d3.mean(contributingCenters, c => c.y)!;
-              const jitter = () => Math.random() * 40 - 10;
-              fuzzyNode.x = avgX + jitter();
-              fuzzyNode.y = avgY + jitter();
-            } else {
-              fuzzyNode.x = width / 2;
-              fuzzyNode.y = height / 2;
-            }
-
-            allNodes.push(fuzzyNode);
-          });
-
         } else {
-          const thisClusterRadius = radiusScale(artistIds.size);
-          const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-
+          // Normal spiral layout for core
           core.forEach((node, i) => {
             const r = thisClusterRadius * Math.sqrt(i / core.length) * 0.9;
             const angle = i * goldenAngle;
-
             node.x = center.x + r * Math.cos(angle);
             node.y = center.y + r * Math.sin(angle);
-
             allNodes.push(node);
           });
 
-          fuzzy.forEach(fuzzyNode => {
-            const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
-            const contributingCenters = fuzzyExhibitions
-              .map(e => clusterCenters.get(e))
-              .filter(Boolean) as { x: number, y: number }[];
-
-            if (contributingCenters.length > 0) {
-              const avgX = d3.mean(contributingCenters, c => c.x)!;
-              const avgY = d3.mean(contributingCenters, c => c.y)!;
-              const jitter = () => Math.random() * 40 - 10;
-              fuzzyNode.x = avgX + jitter();
-              fuzzyNode.y = avgY + jitter();
-            } else {
-              fuzzyNode.x = width / 2;
-              fuzzyNode.y = height / 2;
-            }
-
-            allNodes.push(fuzzyNode);
-          });
-
+          // Add core-core links
           for (let i = 0; i < core.length; i++) {
             for (let j = i + 1; j < core.length; j++) {
               links.push({ source: core[i], target: core[j] });
             }
           }
         }
+
+        // Position fuzzy nodes
+        fuzzy.forEach(fuzzyNode => {
+          const contributingCenters = fuzzyNode.exhibition
+            .split("|")
+            .map(e => clusterCenters.get(e))
+            .filter(Boolean) as { x: number, y: number }[];
+
+          if (contributingCenters.length > 0) {
+            const avgX = d3.mean(contributingCenters, c => c.x)!;
+            const avgY = d3.mean(contributingCenters, c => c.y)!;
+            const jitter = () => Math.random() * 40 - 10;
+            fuzzyNode.x = avgX + jitter();
+            fuzzyNode.y = avgY + jitter();
+          } else {
+            // Fallback to this cluster center
+            fuzzyNode.x = center.x;
+            fuzzyNode.y = center.y;
+          }
+
+          allNodes.push(fuzzyNode);
+        });
       }
+
     });
 
     if (this.aggregationMode !== 'aggregateDisjoint') {
@@ -641,38 +659,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .attr("transform", `translate(${lineMargin.left},0)`)
       .call(d3.axisLeft(y).tickFormat(() => "").ticks(0));
 
-
-    const linkVisibilityThreshold = 0.1;
     let currentTransform: d3.ZoomTransform = d3.zoomIdentity;
-
-    function updateLinkVisibility() {
-      if (!linkElements) return;
-
-      const scale = currentTransform.k;
-
-      if (scale < linkVisibilityThreshold) {
-        linkElements.attr("display", "none");
-        return;
-      }
-
-      const [tx, ty] = [currentTransform.x, currentTransform.y];
-      const scaleInv = 1 / scale;
-
-      const viewX0 = -tx * scaleInv;
-      const viewY0 = -ty * scaleInv;
-      const viewX1 = viewX0 + width * scaleInv;
-      const viewY1 = viewY0 + height * scaleInv;
-
-      linkElements.attr("display", d => {
-        const inView =
-          d.source.x >= viewX0 && d.source.x <= viewX1 &&
-          d.source.y >= viewY0 && d.source.y <= viewY1 &&
-          d.target.x >= viewX0 && d.target.x <= viewX1 &&
-          d.target.y >= viewY0 && d.target.y <= viewY1;
-
-        return inView ? "inline" : "none";
-      });
-    }
 
     svg.call(
       d3.zoom<SVGSVGElement, unknown>()
@@ -681,8 +668,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
           currentTransform = event.transform;
           g.attr("transform", currentTransform.toString());
           this.savedTransform = event.transform;
-          // makes sure to only render visible links
-          //updateLinkVisibility();
         })
     );
   }
