@@ -128,7 +128,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const width = 1920;
     const height = 900;
     const nodeRadius = 4;
-    const layoutRadius = 300;
 
     const artistNodeMap = new Map<string, ArtistNode>();
     const exhibitionMap = new Map<string, Set<string>>();
@@ -165,8 +164,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     });
 
-
-
     const filteredExhibitionMap = new Map(
       Array.from(exhibitionMap.entries()).filter(([ex]) => fuzzyExhibitions.has(ex))
     );
@@ -186,6 +183,22 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       return acc + angle;
     }, 0);
 
+    const minSize = d3.min(groupSizes)!;
+    const maxSize = d3.max(groupSizes)!;
+
+    const radiusScale = d3.scaleSqrt()
+      .domain([minSize, maxSize])
+      .range([3, 100]);
+
+    const metaNodeRadii = currentExhibitions.map(ex => {
+      const groupSize = currentMap.get(ex)!.size;
+      return radiusScale(groupSize);
+    });
+
+    const paddingBetweenNodes = 50;
+    const totalCircumference = d3.sum(metaNodeRadii, r => 2 * r + paddingBetweenNodes);
+    const layoutRadius = totalCircumference / (2 * Math.PI) + 50;
+
     currentExhibitions.forEach((ex, i) => {
       const angle = cumulativeAngles[i] + groupAngleScales[i] / 2;
       clusterCenters.set(ex, {
@@ -193,11 +206,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         y: height / 2 + Math.sin(angle) * layoutRadius
       });
     });
-
-
-    const minSize = d3.min(groupSizes)!;
-    const maxSize = d3.max(groupSizes)!;
-    const radiusScale = d3.scaleLinear().domain([minSize, maxSize]).range([30, 100]);
 
     const allNodes: ArtistNode[] = [];
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
@@ -260,13 +268,18 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       } else {
         const thisClusterRadius = radiusScale(artistIds.size);
 
-        core.forEach(node => {
-          const angle = Math.random() * 2 * Math.PI;
-          const radius = Math.sqrt(Math.random()) * thisClusterRadius;
-          node.x = center.x + Math.cos(angle) * radius;
-          node.y = center.y + Math.sin(angle) * radius;
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+
+        core.forEach((node, i) => {
+          const r = thisClusterRadius * Math.sqrt(i / core.length) * 0.9;
+          const angle = i * goldenAngle;
+
+          node.x = center.x + r * Math.cos(angle);
+          node.y = center.y + r * Math.sin(angle);
+
           allNodes.push(node);
         });
+
 
         fuzzy.forEach(fuzzyNode => {
           const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
