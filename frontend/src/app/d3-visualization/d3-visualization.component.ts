@@ -126,7 +126,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .style("opacity", 0);
 
     const width = 1920;
-    const height = 900;
+    const height = 700;
     const nodeRadius = 4;
 
     const artistNodeMap = new Map<string, ArtistNode>();
@@ -188,7 +188,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
     const radiusScale = d3.scaleSqrt()
       .domain([minSize, maxSize])
-      .range([3, 100]);
+      .range([3, 75]);
 
     const metaNodeRadii = currentExhibitions.map(ex => {
       const groupSize = currentMap.get(ex)!.size;
@@ -210,6 +210,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     const allNodes: ArtistNode[] = [];
     const links: { source: ArtistNode; target: ArtistNode }[] = [];
     const linkSet = new Set<string>();
+    const aggregatedExhibitions = new Set<string>();
 
     // === Layout and core-core linking ===
     currentMap.forEach((artistIds, ex) => {
@@ -225,6 +226,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
 
       const metaNodeRadius = radiusScale(artistIds.size);
+      const aggregationThreshold = 60;
 
       if (this.aggregationMode === "aggregateDisjoint") {
         const metaNode: ArtistNode = {
@@ -266,42 +268,86 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         });
 
       } else {
-        const thisClusterRadius = radiusScale(artistIds.size);
+        if (artistIds.size > aggregationThreshold) {
+          aggregatedExhibitions.add(ex)
+          const metaNode: ArtistNode = {
+            id: `meta-${ex}`,
+            name: `Meta: ${ex}`,
+            exhibition: ex,
+            x: center.x,
+            y: center.y,
+            predominantCommunity: "Meta",
+            fuzziness: 0,
+            fik: [],
+            radius: metaNodeRadius
+          };
+          allNodes.push(metaNode);
 
-        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+          fuzzy.forEach(fuzzyNode => {
+            const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
+            if (fuzzyExhibitions.includes(ex)) {
+              links.push({ source: fuzzyNode, target: metaNode });
+            }
+          });
 
-        core.forEach((node, i) => {
-          const r = thisClusterRadius * Math.sqrt(i / core.length) * 0.9;
-          const angle = i * goldenAngle;
+          fuzzy.forEach(fuzzyNode => {
+            const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
+            const contributingCenters = fuzzyExhibitions
+              .map(e => clusterCenters.get(e))
+              .filter(Boolean) as { x: number, y: number }[];
 
-          node.x = center.x + r * Math.cos(angle);
-          node.y = center.y + r * Math.sin(angle);
+            if (contributingCenters.length > 0) {
+              const avgX = d3.mean(contributingCenters, c => c.x)!;
+              const avgY = d3.mean(contributingCenters, c => c.y)!;
+              const jitter = () => Math.random() * 40 - 10;
+              fuzzyNode.x = avgX + jitter();
+              fuzzyNode.y = avgY + jitter();
+            } else {
+              fuzzyNode.x = width / 2;
+              fuzzyNode.y = height / 2;
+            }
 
-          allNodes.push(node);
-        });
+            allNodes.push(fuzzyNode);
+          });
 
+        } else {
+          const thisClusterRadius = radiusScale(artistIds.size);
+          const goldenAngle = Math.PI * (3 - Math.sqrt(5));
 
-        fuzzy.forEach(fuzzyNode => {
-          const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
-          const contributingCenters = fuzzyExhibitions.map(e => clusterCenters.get(e)).filter(Boolean) as { x: number, y: number }[];
+          core.forEach((node, i) => {
+            const r = thisClusterRadius * Math.sqrt(i / core.length) * 0.9;
+            const angle = i * goldenAngle;
 
-          if (contributingCenters.length > 0) {
-            const avgX = d3.mean(contributingCenters, c => c.x)!;
-            const avgY = d3.mean(contributingCenters, c => c.y)!;
-            const jitter = () => Math.random() * 40 - 10;
-            fuzzyNode.x = avgX + jitter();
-            fuzzyNode.y = avgY + jitter();
-          } else {
-            fuzzyNode.x = width / 2;
-            fuzzyNode.y = height / 2;
-          }
+            node.x = center.x + r * Math.cos(angle);
+            node.y = center.y + r * Math.sin(angle);
 
-          allNodes.push(fuzzyNode);
-        });
+            allNodes.push(node);
+          });
 
-        for (let i = 0; i < core.length; i++) {
-          for (let j = i + 1; j < core.length; j++) {
-            links.push({ source: core[i], target: core[j] });
+          fuzzy.forEach(fuzzyNode => {
+            const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
+            const contributingCenters = fuzzyExhibitions
+              .map(e => clusterCenters.get(e))
+              .filter(Boolean) as { x: number, y: number }[];
+
+            if (contributingCenters.length > 0) {
+              const avgX = d3.mean(contributingCenters, c => c.x)!;
+              const avgY = d3.mean(contributingCenters, c => c.y)!;
+              const jitter = () => Math.random() * 40 - 10;
+              fuzzyNode.x = avgX + jitter();
+              fuzzyNode.y = avgY + jitter();
+            } else {
+              fuzzyNode.x = width / 2;
+              fuzzyNode.y = height / 2;
+            }
+
+            allNodes.push(fuzzyNode);
+          });
+
+          for (let i = 0; i < core.length; i++) {
+            for (let j = i + 1; j < core.length; j++) {
+              links.push({ source: core[i], target: core[j] });
+            }
           }
         }
       }
@@ -316,6 +362,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
         exhibitions.forEach(ex => {
           if (linkedExhibitions.has(ex)) return;
+          if (aggregatedExhibitions.has(ex)) return;
 
           const group = exhibitionMap.get(ex);
           if (!group) return;
