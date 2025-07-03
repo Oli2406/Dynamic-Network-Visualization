@@ -17,18 +17,30 @@
   <div class="btn-container">
     <button class="btn" (click)="updateYear(yearInput)"> Apply </button>
   </div>
+  <label>
+    <input
+      type="checkbox"
+      [(ngModel)]="showOnlyFuzzyExhibitions"
+      (ngModelChange)="onFuzzyToggle($event)"
+    />
+    fuzzy only
+  </label>
+  <div class="aggregation-picker">
+    <label for="aggregation"></label>
+    <select
+      id="aggregation"
+      [(ngModel)]="aggregationMode"
+      (ngModelChange)="onAggregationChange($event)"
+    >
+      <option value="fullDetail">Full detail (no aggregation)</option>
+      <option value="aggregateDisjoint">Aggregate disjoint groups</option>
+    </select>
+  </div>
 </div>
-<label>
-  <input
-    type="checkbox"
-    [(ngModel)]="showOnlyFuzzyExhibitions"
-    (ngModelChange)="onFuzzyToggle($event)"
-  />
-  Show only fuzzy-linked exhibitions
-</label>
 <app-d3-visualization
   [pickedYear]="pickedYear"
-  [showOnlyFuzzyExhibitions]="showOnlyFuzzyExhibitions">
+  [showOnlyFuzzyExhibitions]="showOnlyFuzzyExhibitions"
+  [aggregationMode]="aggregationMode">
 </app-d3-visualization>
 </body>
 </html>

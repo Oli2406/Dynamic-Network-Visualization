@@ -16,6 +16,7 @@ export class AppComponent implements AfterViewInit {
   title = 'frontend';
   pickedYear: number | null = 1929;
   showOnlyFuzzyExhibitions = false;
+  aggregationMode: string = 'fullDetail';
 
   @ViewChild(D3VisualizationComponent)
   d3VisComponent!: D3VisualizationComponent;
@@ -37,6 +38,13 @@ export class AppComponent implements AfterViewInit {
 
   onFuzzyToggle(checked: boolean) {
     if (this.viewInitialized && this.d3VisComponent) {
+      this.d3VisComponent.updateVisualization();
+    }
+  }
+
+  onAggregationChange(mode: string) {
+    this.aggregationMode = mode;
+    if(this.viewInitialized && this.d3VisComponent) {
       this.d3VisComponent.updateVisualization();
     }
   }

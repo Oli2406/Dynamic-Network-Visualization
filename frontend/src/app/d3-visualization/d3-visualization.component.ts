@@ -10,8 +10,11 @@ import * as d3 from 'd3';
 export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   @Input() pickedYear: number | null = 1929;
   @Input() showOnlyFuzzyExhibitions: boolean = false;
+  @Input() aggregationMode: string = 'fullDetail';
   csvData: any[] = [];
   @ViewChild('chartContainer', { static: false }) chartContainer!: ElementRef;
+
+  private savedTransform: d3.ZoomTransform = d3.zoomIdentity;
 
   constructor(private el: ElementRef) {}
 
@@ -24,10 +27,12 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   ngOnChanges(changes: SimpleChanges) {
     const yearChanged = changes['pickedYear'];
     const fuzzyToggleChanged = changes['showOnlyFuzzyExhibitions'];
+    const aggregationModeChanged = changes['aggregationMode'];
 
     const shouldUpdate =
       (yearChanged && yearChanged.currentValue !== yearChanged.previousValue) ||
-      (fuzzyToggleChanged && !fuzzyToggleChanged.firstChange);
+      (fuzzyToggleChanged && fuzzyToggleChanged.previousValue !== undefined) ||
+      (aggregationModeChanged && aggregationModeChanged.previousValue !== undefined);
 
     if (shouldUpdate && this.csvData.length > 0) {
       this.updateVisualization();
@@ -84,6 +89,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       predominantCommunity?: string;
       fuzziness?: number;
       fik?: number[];
+      radius?: number;
     }
 
     const filteredData = this.csvData.filter(d => {
@@ -120,7 +126,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .style("opacity", 0);
 
     const width = 1920;
-    const height = 680;
+    const height = 900;
     const nodeRadius = 4;
     const layoutRadius = 300;
 
@@ -200,7 +206,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     // === Layout and core-core linking ===
     currentMap.forEach((artistIds, ex) => {
       const center = clusterCenters.get(ex)!;
-      const thisClusterRadius = radiusScale(artistIds.size);
+
       const core: ArtistNode[] = [];
       const fuzzy: ArtistNode[] = [];
 
@@ -210,83 +216,126 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         else fuzzy.push(node);
       });
 
-      // Position core nodes
-      core.forEach(node => {
-        const angle = Math.random() * 2 * Math.PI;
-        const radius = Math.sqrt(Math.random()) * thisClusterRadius;
-        node.x = center.x + Math.cos(angle) * radius;
-        node.y = center.y + Math.sin(angle) * radius;
-        allNodes.push(node);
-      });
+      const metaNodeRadius = radiusScale(artistIds.size);
 
-      // Position fuzzy nodes near their exhibition centers (average)
-      fuzzy.forEach(fuzzy => {
-        const fuzzyExhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
-        const contributingCenters = fuzzyExhibitions.map(e => clusterCenters.get(e)).filter(Boolean) as { x: number, y: number }[];
+      if (this.aggregationMode === "aggregateDisjoint") {
+        const metaNode: ArtistNode = {
+          id: `meta-${ex}`,
+          name: `Meta: ${ex}`,
+          exhibition: ex,
+          x: center.x,
+          y: center.y,
+          predominantCommunity: "Meta",
+          fuzziness: 0,
+          fik: [],
+          radius: metaNodeRadius
+        };
+        allNodes.push(metaNode);
 
-        if (contributingCenters.length > 0) {
-          const avgX = d3.mean(contributingCenters, c => c.x)!;
-          const avgY = d3.mean(contributingCenters, c => c.y)!;
-          const jitter = () => Math.random() * 40 - 10;
-          fuzzy.x = avgX + jitter();
-          fuzzy.y = avgY + jitter();
-        } else {
-          fuzzy.x = width / 2;
-          fuzzy.y = height / 2;
-        }
+        fuzzy.forEach(fuzzyNode => {
+          const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
+          if (fuzzyExhibitions.includes(ex)) {
+            links.push({ source: fuzzyNode, target: metaNode });
+          }
+        });
 
-        allNodes.push(fuzzy);
-      });
+        fuzzy.forEach(fuzzyNode => {
+          const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
+          const contributingCenters = fuzzyExhibitions.map(e => clusterCenters.get(e)).filter(Boolean) as { x: number, y: number }[];
 
-      // Link core-core nodes
-      for (let i = 0; i < core.length; i++) {
-        for (let j = i + 1; j < core.length; j++) {
-          links.push({ source: core[i], target: core[j] });
+          if (contributingCenters.length > 0) {
+            const avgX = d3.mean(contributingCenters, c => c.x)!;
+            const avgY = d3.mean(contributingCenters, c => c.y)!;
+            const jitter = () => Math.random() * 40 - 10;
+            fuzzyNode.x = avgX + jitter();
+            fuzzyNode.y = avgY + jitter();
+          } else {
+            fuzzyNode.x = width / 2;
+            fuzzyNode.y = height / 2;
+          }
+
+          allNodes.push(fuzzyNode);
+        });
+
+      } else {
+        const thisClusterRadius = radiusScale(artistIds.size);
+
+        core.forEach(node => {
+          const angle = Math.random() * 2 * Math.PI;
+          const radius = Math.sqrt(Math.random()) * thisClusterRadius;
+          node.x = center.x + Math.cos(angle) * radius;
+          node.y = center.y + Math.sin(angle) * radius;
+          allNodes.push(node);
+        });
+
+        fuzzy.forEach(fuzzyNode => {
+          const fuzzyExhibitions = fuzzyNode.exhibition.split("|").map(e => e.trim());
+          const contributingCenters = fuzzyExhibitions.map(e => clusterCenters.get(e)).filter(Boolean) as { x: number, y: number }[];
+
+          if (contributingCenters.length > 0) {
+            const avgX = d3.mean(contributingCenters, c => c.x)!;
+            const avgY = d3.mean(contributingCenters, c => c.y)!;
+            const jitter = () => Math.random() * 40 - 10;
+            fuzzyNode.x = avgX + jitter();
+            fuzzyNode.y = avgY + jitter();
+          } else {
+            fuzzyNode.x = width / 2;
+            fuzzyNode.y = height / 2;
+          }
+
+          allNodes.push(fuzzyNode);
+        });
+
+        for (let i = 0; i < core.length; i++) {
+          for (let j = i + 1; j < core.length; j++) {
+            links.push({ source: core[i], target: core[j] });
+          }
         }
       }
     });
 
-    // === Fuzzy node linking pass ===
-    allNodes.forEach(fuzzy => {
-      if (fuzzy.fuzziness !== 1) return;
+    if (this.aggregationMode !== 'aggregateDisjoint') {
+      allNodes.forEach(fuzzy => {
+        if (fuzzy.fuzziness !== 1) return;
 
-      const exhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
-      const linkedExhibitions = new Set<string>();
+        const exhibitions = fuzzy.exhibition.split("|").map(e => e.trim());
+        const linkedExhibitions = new Set<string>();
 
-      exhibitions.forEach(ex => {
-        if (linkedExhibitions.has(ex)) return;
+        exhibitions.forEach(ex => {
+          if (linkedExhibitions.has(ex)) return;
 
-        const group = exhibitionMap.get(ex);
-        if (!group) return;
+          const group = exhibitionMap.get(ex);
+          if (!group) return;
 
-        let closest: ArtistNode | undefined;
-        let minDist = Infinity;
+          let closest: ArtistNode | undefined;
+          let minDist = Infinity;
 
-        group.forEach(id => {
-          const other = artistNodeMap.get(id);
-          if (!other || other.id === fuzzy.id || other.fuzziness !== 0) return;
+          group.forEach(id => {
+            const other = artistNodeMap.get(id);
+            if (!other || other.id === fuzzy.id || other.fuzziness !== 0) return;
 
-          const dx = fuzzy.x - other.x;
-          const dy = fuzzy.y - other.y;
-          const dist = dx * dx + dy * dy;
+            const dx = fuzzy.x - other.x;
+            const dy = fuzzy.y - other.y;
+            const dist = dx * dx + dy * dy;
 
-          if (dist < minDist) {
-            minDist = dist;
-            closest = other;
+            if (dist < minDist) {
+              minDist = dist;
+              closest = other;
+            }
+          });
+
+          if (closest) {
+            const key = `${fuzzy.id}→${closest.id}`;
+            if (!linkSet.has(key)) {
+              links.push({source: fuzzy, target: closest});
+              linkSet.add(key);
+              linkedExhibitions.add(ex);
+
+            }
           }
         });
-
-        if (closest) {
-          const key = `${fuzzy.id}→${closest.id}`;
-          if (!linkSet.has(key)) {
-            links.push({ source: fuzzy, target: closest });
-            linkSet.add(key);
-            linkedExhibitions.add(ex);
-
-          }
-        }
       });
-    });
+    }
 
     const seen = new Set<string>();
     const uniqueNodes = allNodes.filter(n => {
@@ -367,7 +416,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .enter()
       .append("circle")
       .attr("class", "node")
-      .attr("r", nodeRadius)
+      .attr("r", d => d.radius ?? nodeRadius)
       .attr("cx", d => d.x)
       .attr("cy", d => d.y)
       .attr("fill", d => {
@@ -571,6 +620,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         .on("zoom", event => {
           currentTransform = event.transform;
           g.attr("transform", currentTransform.toString());
+          this.savedTransform = event.transform;
           // makes sure to only render visible links
           //updateLinkVisibility();
         })
