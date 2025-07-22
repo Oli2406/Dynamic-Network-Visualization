@@ -14,8 +14,8 @@ import { FormsModule } from '@angular/forms';
 })
 export class AppComponent implements AfterViewInit {
   title = 'frontend';
-  pickedYear: number | null = 1929;
-  showOnlyFuzzyExhibitions = false;
+  pickedYear: number | null = 1932;
+  showOnlyFuzzyExhibitions = true;
   aggregationMode: string = 'fullDetail';
 
   @ViewChild(D3VisualizationComponent)

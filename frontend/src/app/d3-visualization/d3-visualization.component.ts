@@ -8,12 +8,13 @@ import * as d3 from 'd3';
   styleUrls: ['./d3-visualization.component.css']
 })
 export class D3VisualizationComponent implements AfterViewInit, OnChanges {
-  @Input() pickedYear: number | null = 1929;
+  @Input() pickedYear: number | null = 1932;
   @Input() showOnlyFuzzyExhibitions: boolean = false;
   @Input() aggregationMode: string = 'fullDetail';
   csvData: any[] = [];
   @ViewChild('chartContainer', { static: false }) chartContainer!: ElementRef;
 
+  private selectedNodeId: string | null = null;
   private savedTransform: d3.ZoomTransform = d3.zoomIdentity;
 
   constructor(private el: ElementRef) {}
@@ -91,17 +92,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       radius?: number;
     }
 
-    const layoutFuzzyNodesAroundCenter = (center: { x: number, y: number }, nodes: ArtistNode[]) => {
-      const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-      const radius = 20;
-      nodes.forEach((node, i) => {
-        const r = radius * Math.sqrt(i);
-        const angle = i * goldenAngle;
-        node.x = center.x + r * Math.cos(angle);
-        node.y = center.y + r * Math.sin(angle);
-      });
-    };
-
     const filteredData = this.csvData.filter(d => {
       const year = d['ExhibitionBeginDate'] ? new Date(d['ExhibitionBeginDate']).getFullYear() : null;
       return year === this.pickedYear;
@@ -134,7 +124,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .style("opacity", 0);
 
     const width = 1920;
-    const height = 700;
+    const height = 1080;
     const nodeRadius = 4;
 
     const artistNodeMap = new Map<string, ArtistNode>();
@@ -187,11 +177,16 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .domain([minSize, maxSize])
       .range([3, 75]);
 
-    const metaNodes = currentExhibitions.map(ex => ({
+    const metaNodes: ArtistNode[] = currentExhibitions.map(ex => ({
       id: ex,
-      radius: radiusScale(currentMap.get(ex)!.size),
+      name: `Meta: ${ex}`,
+      exhibition: ex,
       x: width / 2,
-      y: height / 2
+      y: height / 2,
+      predominantCommunity: "Meta",
+      fuzziness: 0,
+      fik: [],
+      radius: radiusScale(currentMap.get(ex)!.size)
     }));
 
     const metaLinksMap = new Map<string, { source: string, target: string, value: number }>();
@@ -268,14 +263,79 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         const localRadius = 4;
 
         nodes.forEach((node, i) => {
-          const r = localRadius * Math.sqrt(i);
-          const angle = i * goldenAngle;
-          node.x = centerX + r * Math.cos(angle);
-          node.y = centerY + r * Math.sin(angle);
+          const gridSize = Math.ceil(Math.sqrt(nodes.length));
+          const padding = 1;
+          const col = i % gridSize;
+          const row = Math.floor(i / gridSize);
+
+          node.x = centerX + (col - gridSize / 2) * padding;
+          node.y = centerY + (row - gridSize / 2) * padding;
         });
+
       });
     };
 
+    function pushFuzzyOutsideClusters(fuzzyNodes: ArtistNode[], metaNodes: ArtistNode[], padding: number = 10) {
+      fuzzyNodes.forEach(fuzzy => {
+        metaNodes.forEach(meta => {
+          if (fuzzy.exhibition.includes(meta.exhibition)) return;
+
+          const dx = fuzzy.x - meta.x;
+          const dy = fuzzy.y - meta.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const safeDist = (fuzzy.radius ?? 4) + (meta.radius ?? 0) + padding;
+
+          if (dist < safeDist && dist > 0.01) {
+            const offset = (safeDist - dist) / dist;
+            fuzzy.x += dx * offset * 0.5;
+            fuzzy.y += dy * offset * 0.5;
+          }
+        });
+      });
+    }
+
+    function enforceFuzzyCollision(
+      fuzzyNodes: ArtistNode[],
+      coreNodes: ArtistNode[],
+      padding: number = 10
+    ) {
+      fuzzyNodes.forEach(fuzzy => {
+        coreNodes.forEach(core => {
+          const dx = fuzzy.x - core.x;
+          const dy = fuzzy.y - core.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          const minDist = (fuzzy.radius ?? 4) + (core.radius ?? 4) + padding;
+          if (dist < minDist && dist > 0.001) {
+            const offset = (minDist - dist) / dist;
+            fuzzy.x += dx * offset * 0.5;
+            fuzzy.y += dy * offset * 0.5;
+          }
+        });
+      });
+    }
+
+    function repelFuzzyNodes(nodes: ArtistNode[], padding = 4) {
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const minDist = (a.radius ?? 4) + (b.radius ?? 4) + padding;
+
+          if (dist < minDist && dist > 0.001) {
+            const offset = (minDist - dist) / dist * 0.5;
+            const moveX = dx * offset;
+            const moveY = dy * offset;
+
+            a.x += moveX;
+            a.y += moveY;
+            b.x -= moveX;
+            b.y -= moveY;
+          }
+        }
+      }
+    }
 
     currentMap.forEach((artistIds, ex) => {
       const center = clusterCenters.get(ex)!;
@@ -313,6 +373,13 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         });
 
         layoutFuzzyNodesByMembership(fuzzy, clusterCenters);
+
+        for (let i = 0; i < 3; i++) {
+          pushFuzzyOutsideClusters(fuzzy, metaNodes);
+          enforceFuzzyCollision(fuzzy, [metaNode]);
+          repelFuzzyNodes(fuzzy);
+        }
+
         allNodes.push(...fuzzy);
 
       } else {
@@ -332,11 +399,19 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
           links.push(...fuzzy.map(f => ({ source: f, target: anchorNode })));
 
           layoutFuzzyNodesByMembership(fuzzy, clusterCenters);
+
+          for (let i = 0; i < 3; i++) {
+            pushFuzzyOutsideClusters(fuzzy, metaNodes);
+            enforceFuzzyCollision(fuzzy, [anchorNode]);
+            repelFuzzyNodes(fuzzy);
+          }
+
           allNodes.push(...fuzzy);
+
         } else {
           const goldenAngle = Math.PI * (3 - Math.sqrt(5));
           core.forEach((node, i) => {
-            const r = metaNodeRadius * Math.sqrt(i / core.length) * 0.9;
+            const r = metaNodeRadius * Math.sqrt(i / core.length);
             const angle = i * goldenAngle;
             node.x = center.x + r * Math.cos(angle);
             node.y = center.y + r * Math.sin(angle);
@@ -350,6 +425,13 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
           }
 
           layoutFuzzyNodesByMembership(fuzzy, clusterCenters);
+
+          for (let i = 0; i < 3; i++) {
+            pushFuzzyOutsideClusters(fuzzy, metaNodes);
+            enforceFuzzyCollision(fuzzy, core);
+            repelFuzzyNodes(fuzzy);
+          }
+
           allNodes.push(...fuzzy);
         }
       }
@@ -407,7 +489,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
     });
 
     const svg = chartContainer.append("svg")
-      .attr("width", width)
+      .attr("width", "100%")
       .attr("height", height)
       .style("background-color", "#fafafa");
 
@@ -498,8 +580,47 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         tooltip.style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 20) + "px");
       })
       .on("mouseout", () => tooltip.style("opacity", 0))
-      .on("click", function (event, clickedNode) {
+      .on("click", (event, clickedNode)=> {
+
+        this.selectedNodeId = clickedNode.id;
         event.stopPropagation();
+
+        d3.select(".meta-info-box").remove();
+
+        const isMetaNode = clickedNode.id.startsWith("meta-");
+        if (isMetaNode) {
+          const exhibition = clickedNode.exhibition;
+
+          const artistList = Array.from(exhibitionMap.get(exhibition) || [])
+            .map(id => artistNodeMap.get(id))
+            .filter(n => n && n.fuzziness !== undefined) as ArtistNode[];
+
+          const infoBox = chartContainer.append("div")
+            .attr("class", "meta-info-box")
+            .style("position", "absolute")
+            .style("right", "10px")
+            .style("top", "10px")
+            .style("max-height", "300px")
+            .style("overflow-y", "auto")
+            .style("background", "white")
+            .style("border", "1px solid #ccc")
+            .style("border-radius", "4px")
+            .style("padding", "10px")
+            .style("box-shadow", "0 2px 6px rgba(0,0,0,0.15)")
+            .style("z-index", "10")
+            .style("font-size", "12px");
+
+          infoBox.append("div")
+            .style("font-weight", "bold")
+            .style("margin-bottom", "5px")
+            .text(`Artists in "${exhibition}"`);
+
+          artistList.forEach(artist => {
+            infoBox.append("div").text(artist.name);
+          });
+
+          return;
+        }
 
         const connectedIds = new Set<string>();
         const relevantLinks: typeof links = [];
@@ -560,6 +681,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
     svg.on("click", event => {
       if ((event.target as SVGElement).tagName === "circle") return;
+
+      d3.select(".meta-info-box").remove();
 
       linkElements.attr("stroke-opacity", 1).attr("stroke-width", 0.1);
       nodeElements.attr("opacity", 1);
@@ -645,14 +768,14 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
     let currentTransform: d3.ZoomTransform = d3.zoomIdentity;
 
-    svg.call(
-      d3.zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.5, 5])
-        .on("zoom", event => {
-          currentTransform = event.transform;
-          g.attr("transform", currentTransform.toString());
-          this.savedTransform = event.transform;
-        })
-    );
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.5, 5])
+      .on("zoom", event => {
+        currentTransform = event.transform;
+        g.attr("transform", currentTransform.toString());
+        this.savedTransform = event.transform;
+      });
+    svg.call(zoom);
+    svg.call(zoom.transform, this.savedTransform);
   }
 }

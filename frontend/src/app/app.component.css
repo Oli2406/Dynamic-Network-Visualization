@@ -1,13 +1,11 @@
-body {
-  font-family: Arial, sans-serif;
-  background-color: #f4f4f4;
+html, body {
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100vh;
+  height: 100%;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
 }
+
 .header {
   font-size: 2.5em;
   font-weight: bold;
@@ -57,3 +55,27 @@ body {
 .btn-container {
   text-align: center;
 }
+
+.ui-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+
+.date-picker-container {
+  margin-top: 20px;
+  padding: 15px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
