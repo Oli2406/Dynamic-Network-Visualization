@@ -9,8 +9,8 @@ import * as d3 from 'd3';
 })
 export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   @Input() pickedYear: number | null = 1932;
-  @Input() showOnlyFuzzyExhibitions: boolean = false;
-  @Input() aggregationMode: string = 'fullDetail';
+  @Input() showOnlyFuzzyExhibitions: boolean = true;
+  @Input() aggregationMode: string = 'aggregateDisjoint';
   csvData: any[] = [];
   @ViewChild('chartContainer', { static: false }) chartContainer!: ElementRef;
 
@@ -252,7 +252,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         const globalRadius = spacing * Math.sqrt(index + 1);
         const spreadAngle = (2 * Math.PI * index) / groupEntries.length;
 
-
         const offsetX = globalRadius * Math.cos(spreadAngle);
         const offsetY = globalRadius * Math.sin(spreadAngle);
 
@@ -264,12 +263,11 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
         nodes.forEach((node, i) => {
           const gridSize = Math.ceil(Math.sqrt(nodes.length));
-          const padding = 1;
           const col = i % gridSize;
           const row = Math.floor(i / gridSize);
 
-          node.x = centerX + (col - gridSize / 2) * padding;
-          node.y = centerY + (row - gridSize / 2) * padding;
+          node.x = centerX + (col - gridSize / 2);
+          node.y = centerY + (row - gridSize / 2);
         });
 
       });
@@ -315,13 +313,13 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     }
 
-    function repelFuzzyNodes(nodes: ArtistNode[], padding = 4) {
+    function repelFuzzyNodes(nodes: ArtistNode[]) {
       for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
           const a = nodes[i], b = nodes[j];
           const dx = a.x - b.x, dy = a.y - b.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const minDist = (a.radius ?? 4) + (b.radius ?? 4) + padding;
+          const minDist = (a.radius ?? 4) + (b.radius ?? 4);
 
           if (dist < minDist && dist > 0.001) {
             const offset = (minDist - dist) / dist * 0.5;
@@ -350,7 +348,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
 
       const metaNodeRadius = radiusScale(artistIds.size);
-      const aggregationThreshold = 60;
+      const aggregationThreshold = 50;
 
       if (this.aggregationMode === "aggregateDisjoint" || artistIds.size > aggregationThreshold) {
         aggregatedExhibitions.add(ex);

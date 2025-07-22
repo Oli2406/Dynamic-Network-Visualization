@@ -16,7 +16,7 @@ export class AppComponent implements AfterViewInit {
   title = 'frontend';
   pickedYear: number | null = 1932;
   showOnlyFuzzyExhibitions = true;
-  aggregationMode: string = 'fullDetail';
+  aggregationMode: string = 'aggregateDisjoint';
 
   @ViewChild(D3VisualizationComponent)
   d3VisComponent!: D3VisualizationComponent;
