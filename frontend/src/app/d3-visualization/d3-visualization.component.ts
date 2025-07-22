@@ -607,7 +607,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
           infoBox.append("div")
             .attr("class", "meta-info-title")
-            .text(`Artists in "${exhibition}"`);
+            .html(`"${exhibition}"<br>Displaying ${artistList.length} artists`);
+
 
           artistList.forEach(artist => {
             infoBox.append("div").attr("class", "meta-info-artist").text(artist.name);
