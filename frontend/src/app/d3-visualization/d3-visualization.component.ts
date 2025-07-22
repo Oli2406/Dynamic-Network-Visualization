@@ -593,6 +593,8 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
             .map(id => artistNodeMap.get(id))
             .filter(n => n && n.fuzziness !== undefined) as ArtistNode[];
 
+          artistList.sort((a, b) => a.name.localeCompare(b.name));
+
           const overlay = chartContainer.append("div")
             .attr("class", "meta-info-overlay")
             .on("click", () => {
