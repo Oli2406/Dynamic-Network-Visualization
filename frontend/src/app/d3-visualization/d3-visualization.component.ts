@@ -595,28 +595,22 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
             .map(id => artistNodeMap.get(id))
             .filter(n => n && n.fuzziness !== undefined) as ArtistNode[];
 
-          const infoBox = chartContainer.append("div")
-            .attr("class", "meta-info-box")
-            .style("position", "absolute")
-            .style("right", "10px")
-            .style("top", "10px")
-            .style("max-height", "300px")
-            .style("overflow-y", "auto")
-            .style("background", "white")
-            .style("border", "1px solid #ccc")
-            .style("border-radius", "4px")
-            .style("padding", "10px")
-            .style("box-shadow", "0 2px 6px rgba(0,0,0,0.15)")
-            .style("z-index", "10")
-            .style("font-size", "12px");
+          const overlay = chartContainer.append("div")
+            .attr("class", "meta-info-overlay")
+            .on("click", () => {
+              d3.select(".meta-info-overlay").remove();
+              d3.select(".meta-info-box").remove();
+            });
+
+          const infoBox = overlay.append("div")
+            .attr("class", "meta-info-box");
 
           infoBox.append("div")
-            .style("font-weight", "bold")
-            .style("margin-bottom", "5px")
+            .attr("class", "meta-info-title")
             .text(`Artists in "${exhibition}"`);
 
           artistList.forEach(artist => {
-            infoBox.append("div").text(artist.name);
+            infoBox.append("div").attr("class", "meta-info-artist").text(artist.name);
           });
 
           return;

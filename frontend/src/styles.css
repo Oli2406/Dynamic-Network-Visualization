@@ -6,3 +6,42 @@ html, body {
   width: 100%;
   overflow: hidden;
 }
+
+.meta-info-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.meta-info-box {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  max-height: 60vh;
+  max-width: 400px;
+  overflow-y: auto;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+  font-family: Arial, sans-serif;
+}
+
+.meta-info-title {
+  font-size: 1.2rem;
+  font-weight: bold;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.meta-info-artist {
+  margin: 5px 0;
+  font-size: 0.95rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 4px;
+}
