@@ -17,7 +17,124 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
   private selectedNodeId: string | null = null;
   private savedTransform: d3.ZoomTransform = d3.zoomIdentity;
 
+  private stats: any | null = null;
+
   constructor(private el: ElementRef) {}
+
+  private computeStats() {
+    // Unique artists (by normalized DisplayName)
+    const norm = (s: string) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    const artistsSet = new Set<string>();
+    const exYearSet = new Set<string>();
+    const exPerYear = new Map<number, Set<string>>();
+    const artistYearToEx = new Map<string, Set<string>>();
+    const exYearToArtists = new Map<string, Set<string>>();
+    const addToSetMap = <K, V>(m: Map<K, Set<V>>, k: K, v: V) => {
+      if (!m.has(k)) m.set(k, new Set<V>());
+      m.get(k)!.add(v);
+    };
+
+    this.csvData.forEach(d => {
+      const year = +d['Year'];
+      if (!year || isNaN(year)) return;
+
+      const artist = norm(d['DisplayName']);
+      if (!artist) return;
+      artistsSet.add(artist);
+
+      const exhibitions = String(d['ExhibitionTitle'] || "")
+        .split("|")
+        .map(e => e.trim())
+        .filter(e => e.length > 0);
+
+      exhibitions.forEach(ex => {
+        const exYearKey = `${ex}|||${year}`;
+        exYearSet.add(exYearKey);
+        addToSetMap(exPerYear, year, ex);
+        addToSetMap(exYearToArtists, exYearKey, artist);
+      });
+
+      const ayKey = `${artist}|||${year}`;
+      exhibitions.forEach(ex => addToSetMap(artistYearToEx, ayKey, ex));
+    });
+
+    let multiSetCount = 0;
+    let singleSetCount = 0;
+    artistYearToEx.forEach(set => {
+      if (set.size > 1) multiSetCount++;
+      else singleSetCount++;
+    });
+
+    const clusterSizes: number[] = [];
+    exYearToArtists.forEach(s => clusterSizes.push(s.size));
+    clusterSizes.sort((a, b) => a - b);
+
+    const denseThreshold = 50;
+    const veryDenseCount = clusterSizes.filter(s => s >= denseThreshold).length;
+
+    const mean = clusterSizes.length
+      ? clusterSizes.reduce((a, b) => a + b, 0) / clusterSizes.length
+      : 0;
+    const median = clusterSizes.length
+      ? (clusterSizes.length % 2
+        ? clusterSizes[(clusterSizes.length - 1) / 2]
+        : (clusterSizes[clusterSizes.length / 2 - 1] + clusterSizes[clusterSizes.length / 2]) / 2)
+      : 0;
+
+    const distributionOverTime = Array.from(exPerYear.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([year, set]) => ({ year, exhibitions: set.size }));
+
+    this.stats = {
+      totalExhibitions: exYearSet.size,
+      totalArtists: artistsSet.size,
+      distributionOverTime,
+      singleArtistYears: singleSetCount,
+      multiSetArtistYears: multiSetCount,
+      clusterSize: {
+        min: clusterSizes[0] ?? 0,
+        max: clusterSizes[clusterSizes.length - 1] ?? 0,
+        median: +median.toFixed(1),
+        mean: +mean.toFixed(1),
+      },
+      veryDenseExhibitions: veryDenseCount,
+      denseThreshold,
+    };
+
+    console.table(this.stats);
+  }
+
+  private renderStatsBox() {
+    if (!this.stats || !this.chartContainer) return;
+
+    const host = d3.select<HTMLElement, unknown>(this.chartContainer.nativeElement);
+
+    host.selectAll(".stats-box").remove();
+
+    const box = host.append("div")
+      .attr("class", "stats-box")
+      .style("position", "absolute")
+      .style("top", "8px")
+      .style("left", "8px")
+      .style("padding", "8px 10px")
+      .style("background", "rgba(255,255,255,0.95)")
+      .style("border", "1px solid #ddd")
+      .style("border-radius", "6px")
+      .style("font", "12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif")
+      .style("box-shadow", "0 2px 6px rgba(0,0,0,0.08)")
+      .style("z-index", "10");
+
+    const s = this.stats;
+
+    box.html(`
+    <div><strong>Dataset Overview</strong></div>
+    <div>Total exhibitions: ${s.totalExhibitions.toLocaleString()}</div>
+    <div>Total artists: ${s.totalArtists.toLocaleString()}</div>
+    <div>Artist-years (single / multi-set): ${s.singleArtistYears.toLocaleString()} / ${s.multiSetArtistYears.toLocaleString()}</div>
+    <div>Typical cluster size (min / median / mean / max): ${s.clusterSize.min} / ${s.clusterSize.median} / ${s.clusterSize.mean} / ${s.clusterSize.max}</div>
+    <div>Very dense exhibitions (≥ ${s.denseThreshold}): ${s.veryDenseExhibitions}</div>
+  `);
+  }
 
   ngAfterViewInit() {
     setTimeout(() => {
@@ -73,6 +190,9 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       }).filter(d => d !== null);
 
 
+      this.computeStats();
+      this.renderStatsBox();
+
       this.updateVisualization();
     }).catch(error => console.error('Error loading CSVs:', error));
   }
@@ -119,7 +239,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       .style("border", "1px solid #ccc")
       .style("border-radius", "4px")
       .style("pointer-events", "none")
-      .style("font-size", "12px")
+      .style("font-size", "14px")
       .style("box-shadow", "0 2px 4px rgba(0,0,0,0.1)")
       .style("opacity", 0);
 
@@ -257,9 +377,6 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
 
         const centerX = avgX + offsetX;
         const centerY = avgY + offsetY;
-
-        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-        const localRadius = 4;
 
         nodes.forEach((node, i) => {
           const gridSize = Math.ceil(Math.sqrt(nodes.length));
@@ -772,5 +889,7 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     svg.call(zoom);
     svg.call(zoom.transform, this.savedTransform);
+    this.computeStats();
+    this.renderStatsBox();
   }
 }
