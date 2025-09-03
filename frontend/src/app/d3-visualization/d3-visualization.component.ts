@@ -299,10 +299,10 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
         return {...d, Year: year, ...fuzzy};
       }).filter(d => d !== null);
 
-      this.computeStats();
-      this.renderStatsBox();
-      this.computeYearlyMetrics();
-      this.renderTrendBox();
+      //this.computeStats();
+      //this.renderStatsBox();
+      //this.computeYearlyMetrics();
+      //this.renderTrendBox();
 
       this.updateVisualization();
     }).catch(error => console.error('Error loading CSVs:', error));
@@ -1000,9 +1000,9 @@ export class D3VisualizationComponent implements AfterViewInit, OnChanges {
       });
     svg.call(zoom);
     svg.call(zoom.transform, this.savedTransform);
-    this.computeStats();
-    this.renderStatsBox();
-    this.computeYearlyMetrics();
-    this.renderTrendBox();
+    //this.computeStats();
+    //this.renderStatsBox();
+    //this.computeYearlyMetrics();
+    //this.renderTrendBox();
   }
 }
