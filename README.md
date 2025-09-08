@@ -62,4 +62,4 @@ Pick a year between **1929 and 1989** to see a visualized network of exhibitions
 📅 **Year:** 2025  
 
 ## 📄 License
-This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License, see the [LICENSE](LICENSE) file for details.
