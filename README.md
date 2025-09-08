@@ -25,7 +25,7 @@ npm install --save-dev @types/d3
 ### **3. Run the Development Server**
 To start the Angular application, run:
 ```sh
-ng serve
+npm start
 ```
 The application will be available at:
 ```
